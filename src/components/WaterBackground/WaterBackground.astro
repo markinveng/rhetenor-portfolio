@@ -1,0 +1,23 @@
+---
+import styles from "./WaterBackground.module.scss";
+---
+
+<div class={styles.canvasWrapper} data-water-background></div>
+
+<script>
+  import initWaterBackground from "./waterBackground.client";
+
+  const container = document.querySelector(
+    "[data-water-background]"
+  ) as HTMLDivElement | null;
+
+  const cleanup = initWaterBackground(container);
+
+  // ページ遷移/リロード時の後始末（useEffect の return 相当）
+  window.addEventListener("beforeunload", cleanup, { once: true });
+
+  // Astro View Transitions を使っている場合の後始末
+  document.addEventListener("astro:before-swap", cleanup as EventListener, {
+    once: true,
+  });
+</script>

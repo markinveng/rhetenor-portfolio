@@ -1,0 +1,17 @@
+html {
+  font-size: calc(1 / 1440 * 100vw);
+  overflow-x: clip;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+body {
+  width: 100%;
+  font-size: 14rem;
+  position: relative;
+  font-feature-settings: "palt";
+  overflow-x: clip;
+}

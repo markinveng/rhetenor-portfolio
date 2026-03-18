@@ -1,5 +1,5 @@
 {
-  "name": "far-fusion",
+  "name": "rhetenor-portfolio",
   "type": "module",
   "version": "0.0.1",
   "engines": {
@@ -12,6 +12,16 @@
     "astro": "astro"
   },
   "dependencies": {
-    "astro": "^6.0.6"
+    "astro": "^6.0.6",
+    "gsap": "^3.14.2",
+    "lenis": "^1.3.19",
+    "lil-gui": "^0.21.0",
+    "microcms-js-sdk": "^3.3.0",
+    "three": "^0.183.2"
+  },
+  "devDependencies": {
+    "@types/three": "^0.183.1",
+    "prettier-plugin-astro": "^0.14.1",
+    "sass-embedded": "^1.98.0"
   }
 }
