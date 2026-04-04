@@ -1,5 +1,59 @@
 # Astro Starter Kit: Basics
 
+## Node.js version
+
+This project requires Node.js `>= 22.12.0` (Astro v6).
+
+### macOS upgrade (recommended: nvm)
+
+1. Install nvm
+
+```sh
+brew install nvm
+mkdir -p ~/.nvm
+```
+
+Add this to your `~/.zshrc`:
+
+```sh
+export NVM_DIR="$HOME/.nvm"
+source "$(brew --prefix nvm)/nvm.sh"
+```
+
+Restart your terminal, then:
+
+```sh
+nvm install 22.12.0
+nvm use 22.12.0
+nvm alias default 22.12.0
+node -v
+```
+
+2. Install deps and run
+
+```sh
+npm install
+npm run dev
+```
+
+### Alternatives
+
+- Volta:
+
+```sh
+brew install volta
+volta install node@22.12.0
+node -v
+```
+
+- Homebrew (if you don't need per-project switching):
+
+```sh
+brew install node@22
+brew link --overwrite --force node@22
+node -v
+```
+
 ```sh
 npm create astro@latest -- --template basics
 ```

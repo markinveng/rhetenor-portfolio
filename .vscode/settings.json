@@ -1,8 +1,11 @@
 {
   "cSpell.words": [
+    "Equirectangular",
     "FXAA",
     "GLTF",
+    "metalness",
     "palt",
+    "raycaster",
     "rhetenor",
     "webgpu"
   ]

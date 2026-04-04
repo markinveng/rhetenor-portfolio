@@ -1,52 +1,48 @@
-import * as THREE from "three";
-import * as THREEWebGPU from "three/webgpu";
+import * as THREE from "three/webgpu";
 import GUI from "lil-gui";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import {
   Fn,
-  clamp,
-  cos,
-  float,
-  instancedArray,
-  instanceIndex,
-  int,
   length,
+  vec2,
+  vec3,
+  float,
+  uniform,
+  positionLocal,
+  clamp,
   max,
   min,
   pass,
-  positionLocal,
   renderOutput,
-  select,
-  transformNormalToView,
+  instanceIndex,
+  instancedArray,
   uint,
-  uniform,
-  vec2,
-  vec3,
-  vertexIndex,
+  int,
+  cos,
+  transformNormalToView,
+  select,
 } from "three/tsl";
 import { fxaa } from "three/addons/tsl/display/FXAANode.js";
 import { UltraHDRLoader } from "three/addons/loaders/UltraHDRLoader.js";
-import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 
-export type WaterBackgroundCleanup = () => void;
+type Cleanup = () => void;
 
 export default function initWaterBackground(
   container: HTMLDivElement | null
-): WaterBackgroundCleanup {
-  if (!container || !("gpu" in navigator)) return () => { };
+): Cleanup {
+  if (!container || !("gpu" in navigator)) {
+    return () => { };
+  }
 
   const scene = new THREE.Scene();
 
   const hdrLoader = new UltraHDRLoader();
-  hdrLoader.load(
-    "/textures/moonless_golf_2k.hdr.jpg",
-    (texture: THREE.Texture) => {
-      texture.mapping = THREE.EquirectangularReflectionMapping;
-      texture.needsUpdate = true;
-      scene.background = texture;
-      scene.environment = texture;
-    }
-  );
+  hdrLoader.load("/textures/moonless_golf_2k.hdr.jpg", (texture: any) => {
+    texture.mapping = THREE.EquirectangularReflectionMapping;
+    texture.needsUpdate = true;
+    scene.background = texture;
+    scene.environment = texture;
+  });
 
   const camera = new THREE.PerspectiveCamera(
     45,
@@ -67,15 +63,6 @@ export default function initWaterBackground(
     targetZ: 0,
     showAxes: true,
     enableOrbit: false,
-    modelUrl: "/models/PFsite.glb",
-    modelTargetSize: 10,
-    modelScale: 1,
-    modelX: 0,
-    modelY: 0,
-    modelZ: -0.8,
-    modelRotX: 0,
-    modelRotY: 0,
-    modelRotZ: 0,
     mouseSizeHover: 0.12,
     mouseDeepHover: 0.5,
     mouseSizeClick: 0.2,
@@ -92,7 +79,7 @@ export default function initWaterBackground(
   };
   updateCamera();
 
-  let renderer: any = new (THREEWebGPU as any).WebGPURenderer({
+  let renderer: any = new THREE.WebGPURenderer({
     antialias: true,
     alpha: true,
   });
@@ -103,7 +90,7 @@ export default function initWaterBackground(
   renderer.setClearAlpha(0);
   container.appendChild(renderer.domElement);
 
-  let postProcessing: any = new (THREEWebGPU as any).PostProcessing(renderer);
+  let postProcessing: any = new (THREE as any).RenderPipeline(renderer);
   postProcessing.outputColorTransform = false;
 
   const scenePass = pass(scene, camera);
@@ -114,60 +101,11 @@ export default function initWaterBackground(
   const ambient = new THREE.AmbientLight(0xffffff, 0.8);
   scene.add(ambient);
 
-  let modelRoot: THREE.Object3D | null = null;
-  const placeModel = (): void => {
-    if (!modelRoot) return;
-
-    const box = new THREE.Box3().setFromObject(modelRoot);
-    const size = new THREE.Vector3();
-    box.getSize(size);
-    const maxAxis = Math.max(size.x, size.y, size.z) || 1;
-    const fitScale = params.modelTargetSize / maxAxis;
-
-    modelRoot.scale.setScalar(fitScale * params.modelScale);
-
-    box.setFromObject(modelRoot);
-    const center = new THREE.Vector3();
-    box.getCenter(center);
-    modelRoot.position.set(-center.x, -center.y, -center.z);
-
-    modelRoot.position.x += params.modelX;
-    modelRoot.position.y += params.modelY;
-    modelRoot.position.z += params.modelZ;
-    modelRoot.rotation.set(params.modelRotX, params.modelRotY, params.modelRotZ);
-
-    modelRoot.updateMatrixWorld(true);
-  };
-
-  const gltfLoader = new GLTFLoader();
-  gltfLoader.load(
-    params.modelUrl,
-    (gltf: any) => {
-      modelRoot = gltf.scene;
-      if (modelRoot) modelRoot.name = "PFsite";
-
-      modelRoot?.traverse((obj: any) => {
-        if (obj && obj.isMesh) obj.frustumCulled = true;
-      });
-
-      placeModel();
-      if (modelRoot) scene.add(modelRoot);
-    },
-    undefined,
-    (error: unknown) => {
-      // eslint-disable-next-line no-console
-      console.error("Failed to load GLB:", error);
-    }
-  );
-
   const WIDTH = 128;
   const BOUNDS_X = 30;
   const BOUNDS_Y = 20;
 
   const initialHeights = new Float32Array(WIDTH * WIDTH);
-  for (let i = 0; i < initialHeights.length; i++) {
-    initialHeights[i] = (Math.random() - 0.5) * 0.02;
-  }
 
   const heightStorageA = instancedArray(initialHeights);
   const heightStorageB = instancedArray(new Float32Array(initialHeights));
@@ -175,7 +113,9 @@ export default function initWaterBackground(
 
   const readFromA = uniform(1);
 
-  const getNeighborIndicesTSL = (index: any): {
+  const getNeighborIndicesTSL = (
+    index: any
+  ): {
     northIndex: any;
     southIndex: any;
     eastIndex: any;
@@ -193,7 +133,6 @@ export default function initWaterBackground(
 
     const westIndex = y.mul(width).add(leftX);
     const eastIndex = y.mul(width).add(rightX);
-
     const southIndex = bottomY.mul(width).add(x);
     const northIndex = topY.mul(width).add(x);
 
@@ -264,6 +203,7 @@ export default function initWaterBackground(
 
   const computeHeightAtoB = createComputeHeight(heightStorageA, heightStorageB);
   const computeHeightBtoA = createComputeHeight(heightStorageB, heightStorageA);
+  const computeDispatchSize = [WIDTH / 8, WIDTH / 8, 1] as const;
 
   const getCurrentHeight = (index: any): any => {
     return select(
@@ -288,9 +228,32 @@ export default function initWaterBackground(
     return { normalX, normalY };
   };
 
-  const waterGeometry = new THREE.PlaneGeometry(BOUNDS_X, BOUNDS_Y, WIDTH - 1, WIDTH - 1);
+  const getGridIndexFromPositionTSL = (): any => {
+    const x = clamp(
+      positionLocal.x.add(BOUNDS_X * 0.5).div(BOUNDS_X).mul(WIDTH - 1),
+      0.0,
+      WIDTH - 1
+    );
+    const y = clamp(
+      positionLocal.y.negate().add(BOUNDS_Y * 0.5).div(BOUNDS_Y).mul(WIDTH - 1),
+      0.0,
+      WIDTH - 1
+    );
 
-  const waterMaterial = new (THREEWebGPU as any).MeshStandardNodeMaterial({
+    const xIndex = int(x.add(0.5));
+    const yIndex = int(y.add(0.5));
+
+    return yIndex.mul(WIDTH).add(xIndex);
+  };
+
+  const waterGeometry = new THREE.PlaneGeometry(
+    BOUNDS_X,
+    BOUNDS_Y,
+    WIDTH - 1,
+    WIDTH - 1
+  );
+
+  const waterMaterial = new (THREE as any).MeshStandardNodeMaterial({
     color: new THREE.Color(params.color),
     metalness: 0.9,
     roughness: 0.1,
@@ -300,14 +263,14 @@ export default function initWaterBackground(
   });
 
   waterMaterial.normalNode = Fn(() => {
-    const { normalX, normalY } = getCurrentNormals(vertexIndex);
+    const { normalX, normalY } = getCurrentNormals(getGridIndexFromPositionTSL());
     return transformNormalToView(
       vec3(normalX.negate(), normalY.negate(), float(1.0))
     ).toVertexStage();
   })();
 
   waterMaterial.positionNode = Fn(() => {
-    const h = getCurrentHeight(vertexIndex);
+    const h = getCurrentHeight(getGridIndexFromPositionTSL());
     return vec3(positionLocal.x, positionLocal.y, h);
   })();
 
@@ -337,20 +300,29 @@ export default function initWaterBackground(
   controls.update();
 
   const raycaster = new THREE.Raycaster();
+  const interactionPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
+  const intersectionPointWorld = new THREE.Vector3();
+  const intersectionPointLocal = new THREE.Vector3();
   const mouseNdc = new THREE.Vector2();
   const lastMouseWorld = new THREE.Vector2();
   let hasLastMouseWorld = false;
   let isMouseDown = false;
 
   const setMouseCoords = (event: PointerEvent): void => {
-    if (!renderer) return;
+    if (!renderer) {
+      return;
+    }
+
     const rect = renderer.domElement.getBoundingClientRect();
     mouseNdc.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
     mouseNdc.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
   };
 
   const onPointerMove = (event: PointerEvent): void => {
-    if (event.isPrimary === false) return;
+    if (event.isPrimary === false) {
+      return;
+    }
+
     setMouseCoords(event);
   };
 
@@ -366,15 +338,25 @@ export default function initWaterBackground(
     mouseSpeed.value.set(0, 0);
   };
 
+  const onPointerLeave = (): void => {
+    hasLastMouseWorld = false;
+    mouseSpeed.value.set(0, 0);
+  };
+
   renderer.domElement.style.touchAction = "none";
-  renderer.domElement.addEventListener("pointermove", onPointerMove);
-  renderer.domElement.addEventListener("pointerdown", onPointerDown);
+  window.addEventListener("pointermove", onPointerMove, { passive: true });
+  window.addEventListener("pointerdown", onPointerDown, { passive: true });
   window.addEventListener("pointerup", onPointerUp);
+  window.addEventListener("pointercancel", onPointerUp);
+  window.addEventListener("blur", onPointerLeave);
 
   const onResize = (): void => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
-    if (renderer) renderer.setSize(window.innerWidth, window.innerHeight);
+
+    if (renderer) {
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    }
   };
   window.addEventListener("resize", onResize);
 
@@ -384,121 +366,141 @@ export default function initWaterBackground(
   waveFolder
     .add(params, "opacity", 0.3, 1.0, 0.05)
     .name("Opacity")
-    .onChange((v: number) => {
-      waterMaterial.opacity = v;
+    .onChange((value: number) => {
+      waterMaterial.opacity = value;
     });
   waveFolder
     .add(params, "mouseSizeHover", 0.05, 0.3, 0.01)
     .name("Hover Size")
-    .onChange((v: number) => {
-      params.mouseSizeHover = v;
+    .onChange((value: number) => {
+      params.mouseSizeHover = value;
     });
   waveFolder
     .add(params, "mouseDeepHover", 0.1, 1.0, 0.05)
     .name("Hover Deep")
-    .onChange((v: number) => {
-      params.mouseDeepHover = v;
+    .onChange((value: number) => {
+      params.mouseDeepHover = value;
     });
   waveFolder
     .add(params, "mouseSizeClick", 0.1, 0.5, 0.01)
     .name("Click Size")
-    .onChange((v: number) => {
-      params.mouseSizeClick = v;
+    .onChange((value: number) => {
+      params.mouseSizeClick = value;
     });
   waveFolder
     .add(params, "mouseDeepClick", 0.2, 1.5, 0.05)
     .name("Click Deep")
-    .onChange((v: number) => {
-      params.mouseDeepClick = v;
+    .onChange((value: number) => {
+      params.mouseDeepClick = value;
     });
   waveFolder
     .add(params, "viscosity", 0.9, 0.99, 0.001)
     .name("Viscosity")
-    .onChange((v: number) => {
-      viscosity.value = v;
+    .onChange((value: number) => {
+      viscosity.value = value;
     });
   waveFolder.add(params, "simSpeed", 1, 6, 1).name("Sim Speed");
   waveFolder.open();
 
   const cameraFolder = gui.addFolder("Camera");
-  cameraFolder.add(params, "cameraX", -50, 50, 0.1).name("Pos X").onChange(updateCamera);
-  cameraFolder.add(params, "cameraY", -50, 50, 0.1).name("Pos Y").onChange(updateCamera);
-  cameraFolder.add(params, "cameraZ", -50, 50, 0.1).name("Pos Z").onChange(updateCamera);
-  cameraFolder.add(params, "targetX", -20, 20, 0.1).name("LookAt X").onChange(updateCamera);
-  cameraFolder.add(params, "targetY", -20, 20, 0.1).name("LookAt Y").onChange(updateCamera);
-  cameraFolder.add(params, "targetZ", -20, 20, 0.1).name("LookAt Z").onChange(updateCamera);
-  cameraFolder.add(params, "fov", 20, 100, 1).name("FOV").onChange(updateCamera);
+  cameraFolder
+    .add(params, "cameraX", -50, 50, 0.1)
+    .name("Pos X")
+    .onChange(updateCamera);
+  cameraFolder
+    .add(params, "cameraY", -50, 50, 0.1)
+    .name("Pos Y")
+    .onChange(updateCamera);
+  cameraFolder
+    .add(params, "cameraZ", -50, 50, 0.1)
+    .name("Pos Z")
+    .onChange(updateCamera);
+  cameraFolder
+    .add(params, "targetX", -20, 20, 0.1)
+    .name("LookAt X")
+    .onChange(updateCamera);
+  cameraFolder
+    .add(params, "targetY", -20, 20, 0.1)
+    .name("LookAt Y")
+    .onChange(updateCamera);
+  cameraFolder
+    .add(params, "targetZ", -20, 20, 0.1)
+    .name("LookAt Z")
+    .onChange(updateCamera);
+  cameraFolder
+    .add(params, "fov", 20, 100, 1)
+    .name("FOV")
+    .onChange(updateCamera);
   cameraFolder.open();
 
   const debugFolder = gui.addFolder("Debug");
   debugFolder
     .add(params, "enableOrbit")
     .name("OrbitControls")
-    .onChange((v: boolean) => {
-      controls.enabled = v;
+    .onChange((value: boolean) => {
+      controls.enabled = value;
     });
   debugFolder
     .add(params, "showAxes")
     .name("AxesHelper")
-    .onChange((v: boolean) => {
-      axesHelper.visible = v;
+    .onChange((value: boolean) => {
+      axesHelper.visible = value;
     });
   debugFolder.open();
-
-  const modelFolder = gui.addFolder("Model");
-  modelFolder.add(params, "modelScale", 0.1, 5.0, 0.01).name("Scale").onChange(() => placeModel());
-  modelFolder.add(params, "modelX", -30, 30, 0.01).name("Pos X").onChange(() => placeModel());
-  modelFolder.add(params, "modelY", -30, 30, 0.01).name("Pos Y").onChange(() => placeModel());
-  modelFolder.add(params, "modelZ", -30, 30, 0.01).name("Pos Z").onChange(() => placeModel());
-  modelFolder
-    .add(params, "modelRotX", -Math.PI, Math.PI, 0.01)
-    .name("Rot X")
-    .onChange(() => placeModel());
-  modelFolder
-    .add(params, "modelRotY", -Math.PI, Math.PI, 0.01)
-    .name("Rot Y")
-    .onChange(() => placeModel());
-  modelFolder
-    .add(params, "modelRotZ", -Math.PI, Math.PI, 0.01)
-    .name("Rot Z")
-    .onChange(() => placeModel());
-  modelFolder.open();
 
   let pingPong = 0;
   let frameCounter = 0;
 
   const raycast = (): void => {
-    if (!renderer) return;
+    if (!renderer) {
+      return;
+    }
 
     raycaster.setFromCamera(mouseNdc, camera);
-    const intersects = raycaster.intersectObject(water);
+    const intersectsPlane = raycaster.ray.intersectPlane(
+      interactionPlane,
+      intersectionPointWorld
+    );
 
-    if (intersects.length > 0) {
-      const p = intersects[0].point;
-      const current = new THREE.Vector2(p.x, p.y);
+    if (intersectsPlane) {
+      intersectionPointLocal.copy(intersectionPointWorld);
+      water.worldToLocal(intersectionPointLocal);
 
-      if (!hasLastMouseWorld) {
+      const isInsideX = Math.abs(intersectionPointLocal.x) <= BOUNDS_X * 0.5;
+      const isInsideY = Math.abs(intersectionPointLocal.y) <= BOUNDS_Y * 0.5;
+
+      if (isInsideX && isInsideY) {
+        const current = new THREE.Vector2(
+          intersectionPointLocal.x,
+          intersectionPointLocal.y
+        );
+
+        if (!hasLastMouseWorld) {
+          lastMouseWorld.copy(current);
+          hasLastMouseWorld = true;
+        }
+
+        const dx = current.x - lastMouseWorld.x;
+        const dy = current.y - lastMouseWorld.y;
+
+        mousePos.value.set(current.x, current.y);
+
+        const strengthScale = isMouseDown ? 1.0 : 0.4;
+        mouseSpeed.value.set(dx * strengthScale, dy * strengthScale);
+
         lastMouseWorld.copy(current);
-        hasLastMouseWorld = true;
+        return;
       }
-
-      const dx = current.x - lastMouseWorld.x;
-      const dy = current.y - lastMouseWorld.y;
-
-      mousePos.value.set(current.x, current.y);
-
-      const strengthScale = isMouseDown ? 1.0 : 0.4;
-      mouseSpeed.value.set(dx * strengthScale, dy * strengthScale);
-
-      lastMouseWorld.copy(current);
-    } else {
-      hasLastMouseWorld = false;
-      mouseSpeed.value.set(0, 0);
     }
+
+    hasLastMouseWorld = false;
+    mouseSpeed.value.set(0, 0);
   };
 
   const animate = (): void => {
-    if (!renderer || !postProcessing) return;
+    if (!renderer || !postProcessing) {
+      return;
+    }
 
     if (isMouseDown) {
       mouseSize.value = params.mouseSizeClick;
@@ -510,14 +512,14 @@ export default function initWaterBackground(
 
     raycast();
 
-    frameCounter++;
+    frameCounter += 1;
     const frameThreshold = 7 - params.simSpeed;
     if (frameCounter >= frameThreshold) {
       if (pingPong === 0) {
-        (renderer as any).compute(computeHeightAtoB, [8, 8, 1]);
+        (renderer as any).compute(computeHeightAtoB, computeDispatchSize);
         readFromA.value = 0;
       } else {
-        (renderer as any).compute(computeHeightBtoA, [8, 8, 1]);
+        (renderer as any).compute(computeHeightBtoA, computeDispatchSize);
         readFromA.value = 1;
       }
       pingPong = 1 - pingPong;
@@ -529,18 +531,17 @@ export default function initWaterBackground(
   };
   renderer.setAnimationLoop(animate);
 
-  return () => {
-    if (renderer) renderer.setAnimationLoop(null);
-
-    window.removeEventListener("resize", onResize);
-
+  return (): void => {
     if (renderer) {
-      renderer.domElement.removeEventListener("pointermove", onPointerMove);
-      renderer.domElement.removeEventListener("pointerdown", onPointerDown);
+      renderer.setAnimationLoop(null);
     }
 
+    window.removeEventListener("resize", onResize);
+    window.removeEventListener("pointermove", onPointerMove);
+    window.removeEventListener("pointerdown", onPointerDown);
     window.removeEventListener("pointerup", onPointerUp);
-
+    window.removeEventListener("pointercancel", onPointerUp);
+    window.removeEventListener("blur", onPointerLeave);
     gui.destroy();
 
     if (renderer && renderer.domElement.parentNode) {
@@ -552,24 +553,8 @@ export default function initWaterBackground(
     floorGeometry.dispose();
     floorMaterial.dispose();
     axesHelper.geometry.dispose();
-    (axesHelper.material as THREE.Material).dispose();
+    (axesHelper.material as any).dispose();
     controls.dispose();
-
-    if (modelRoot) {
-      scene.remove(modelRoot);
-      modelRoot.traverse((obj: any) => {
-        if (obj && obj.isMesh) {
-          if (obj.geometry) obj.geometry.dispose();
-          const material = obj.material;
-          if (Array.isArray(material)) {
-            material.forEach((m) => m && m.dispose && m.dispose());
-          } else if (material && material.dispose) {
-            material.dispose();
-          }
-        }
-      });
-      modelRoot = null;
-    }
 
     renderer = null;
     postProcessing = null;

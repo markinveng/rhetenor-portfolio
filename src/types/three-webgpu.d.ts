@@ -4,6 +4,7 @@ declare module "three/webgpu" {
 }
 
 declare module "three/tsl" {
+  export const attribute: any;
   export const Fn: any;
   export const clamp: any;
   export const cos: any;
