@@ -1,0 +1,29 @@
+---
+import Layout from '../layouts/Layout.astro';
+import { getPortfolioBySlug } from '../lib/microcms';
+
+const requestUrl = new URL(Astro.request.url);
+const slug = requestUrl.searchParams.get('name');
+
+if (!slug) {
+  return Astro.redirect('/');
+}
+
+const { contents } = await getPortfolioBySlug(slug);
+const portfolio = contents[0];
+
+if (!portfolio) {
+  return Astro.redirect('/');
+}
+---
+
+<Layout
+  title={portfolio.metaTitle}
+  metaDescription={portfolio.metaDescription}
+  ogpImage={portfolio.ogpImage.url}
+>
+  <main>
+    <h1>{portfolio.title}</h1>
+    <p>{portfolio.modalDescription}</p>
+  </main>
+</Layout>

@@ -1,3 +1,16 @@
+---
+interface Props {
+  title?: string;
+  metaDescription?: string;
+  ogpImage?: string;
+}
+
+const {
+  title = 'Rhetenor',
+  metaDescription,
+  ogpImage,
+} = Astro.props;
+---
 <!doctype html>
 <html lang="en">
 	<head>
@@ -6,7 +19,11 @@
 		<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
 		<link rel="icon" href="/favicon.ico" />
 		<meta name="generator" content={Astro.generator} />
-		<title>Rhetenor</title>
+		<title>{title}</title>
+		{metaDescription && <meta name="description" content={metaDescription} />}
+		{metaDescription && <meta property="og:description" content={metaDescription} />}
+		{ogpImage && <meta property="og:image" content={ogpImage} />}
+		<meta property="og:title" content={title} />
 	</head>
 	<body>
 		<slot />
