@@ -1,6 +1,6 @@
-import { c as createComponent } from './astro-component_vCVvGzj5.mjs';
+import { c as createComponent } from './astro-component_DDUYitOb.mjs';
 import 'piccolore';
-import { h as addAttribute, k as renderTemplate, o as renderHead, p as renderSlot, q as renderComponent, m as maybeRenderHead, u as unescapeHTML } from './entrypoint_YawduVu9.mjs';
+import { h as addAttribute, k as renderTemplate, o as renderHead, p as renderSlot, q as renderComponent, m as maybeRenderHead, u as unescapeHTML } from './entrypoint_DPuH0idw.mjs';
 import 'clsx';
 import { createClient } from 'microcms-js-sdk';
 
@@ -35,11 +35,15 @@ const $$Discover = createComponent(async ($$result, $$props, $$slots) => {
   const slug = Astro2.url.searchParams.get("name");
   console.log("[discover.astro] slug:", slug);
   console.log("[discover.astro] Full URL:", Astro2.url.href);
+  console.log("[discover.astro] Environment check:");
+  console.log("[discover.astro] MICROCMS_SERVICE_DOMAIN:", "set" );
+  console.log("[discover.astro] MICROCMS_API_KEY:", "set" );
   if (!slug) {
     console.log("[discover.astro] No slug, redirecting to /");
     return Astro2.redirect("/");
   }
   let portfolioData;
+  let errorMessage = "";
   try {
     console.log("[discover.astro] Fetching portfolio for slug:", slug);
     const { contents } = await getPortfolioBySlug(slug);
@@ -53,12 +57,31 @@ const $$Discover = createComponent(async ($$result, $$props, $$slots) => {
     console.log("[discover.astro] Portfolio found:", portfolioData.title);
   } catch (error) {
     console.error("[discover.astro] Error fetching portfolio:", error);
-    console.error("[discover.astro] Error stack:", error.stack);
-    return Astro2.redirect("/");
+    if (error instanceof Error) {
+      console.error("[discover.astro] Error message:", error.message);
+      console.error("[discover.astro] Error stack:", error.stack);
+      errorMessage = error.message;
+    } else {
+      errorMessage = String(error);
+    }
+    return new Response(`
+    <html>
+      <head><title>Error - Debug</title></head>
+      <body>
+        <h1>Error loading portfolio</h1>
+        <p>Slug: ${slug}</p>
+        <p>Error: ${errorMessage}</p>
+        <p>Check Vercel function logs for more details</p>
+        <p><a href="/">Back to home</a></p>
+      </body>
+    </html>
+  `, {
+      status: 500,
+      headers: { "Content-Type": "text/html" }
+    });
   }
-  return renderTemplate`${renderComponent($$result, "Layout", $$Layout, { "title": portfolioData.metaTitle, "metaDescription": portfolioData.metaDescription, "ogpImage": portfolioData.ogpImage.url }, { "default": async ($$result2) => renderTemplate` ${maybeRenderHead()}<main> <h1>${portfolioData.title}</h1> <div>${unescapeHTML(portfolioData.modalDescription)}</div> </main> ` })}`;
+  return renderTemplate`${renderComponent($$result, "Layout", $$Layout, { "title": portfolioData.metaTitle, "metaDescription": portfolioData.metaDescription, "ogpImage": portfolioData.ogpImage.url }, { "default": async ($$result2) => renderTemplate` ${maybeRenderHead()}<main> <h1>${portfolioData.title}</h1> <div>${unescapeHTML(portfolioData.modalDescription)}</div> </main> ` })} `;
 }, "C:/Users/marki/Documents/rhetenor-portfolio/src/pages/discover.astro", void 0);
-
 const $$file = "C:/Users/marki/Documents/rhetenor-portfolio/src/pages/discover.astro";
 const $$url = "/discover";
 
