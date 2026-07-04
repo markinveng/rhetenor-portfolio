@@ -1,6 +1,6 @@
-import { c as createComponent } from './astro-component_fkA9uaMe.mjs';
+import { c as createComponent } from './astro-component_vCVvGzj5.mjs';
 import 'piccolore';
-import { h as addAttribute, k as renderTemplate, o as renderHead, p as renderSlot, q as renderComponent, m as maybeRenderHead } from './entrypoint_CbYZzpXs.mjs';
+import { h as addAttribute, k as renderTemplate, o as renderHead, p as renderSlot, q as renderComponent, m as maybeRenderHead, u as unescapeHTML } from './entrypoint_YawduVu9.mjs';
 import 'clsx';
 import { createClient } from 'microcms-js-sdk';
 
@@ -17,27 +17,46 @@ const $$Layout = createComponent(($$result, $$props, $$slots) => {
 
 const serviceDomain = "70v3xlkfyr";
 const apiKey = "wTwQhMLIrxElem92oVhdJRJD3fTTbzMUpLSj";
+console.log("[microcms] serviceDomain:", "set" );
+console.log("[microcms] apiKey:", "set" );
 const client = createClient({ serviceDomain, apiKey });
-const getPortfolioBySlug = (slug) => client.getList({
-  endpoint: "portfolio",
-  queries: { filters: `slug[equals]${slug}` }
-});
+const getPortfolioBySlug = (slug) => {
+  console.log("[microcms] getPortfolioBySlug called with slug:", slug);
+  return client.getList({
+    endpoint: "portfolio",
+    queries: { filters: `slug[equals]${slug}` }
+  });
+};
 
 const prerender = false;
 const $$Discover = createComponent(async ($$result, $$props, $$slots) => {
   const Astro2 = $$result.createAstro($$props, $$slots);
   Astro2.self = $$Discover;
-  const requestUrl = new URL(Astro2.request.url);
-  const slug = requestUrl.searchParams.get("name");
+  const slug = Astro2.url.searchParams.get("name");
+  console.log("[discover.astro] slug:", slug);
+  console.log("[discover.astro] Full URL:", Astro2.url.href);
   if (!slug) {
+    console.log("[discover.astro] No slug, redirecting to /");
     return Astro2.redirect("/");
   }
-  const { contents } = await getPortfolioBySlug(slug);
-  const portfolio = contents[0];
-  if (!portfolio) {
+  let portfolioData;
+  try {
+    console.log("[discover.astro] Fetching portfolio for slug:", slug);
+    const { contents } = await getPortfolioBySlug(slug);
+    console.log("[discover.astro] API response contents length:", contents?.length);
+    const portfolio = contents[0];
+    if (!portfolio) {
+      console.log("[discover.astro] No portfolio found, redirecting to /");
+      return Astro2.redirect("/");
+    }
+    portfolioData = portfolio;
+    console.log("[discover.astro] Portfolio found:", portfolioData.title);
+  } catch (error) {
+    console.error("[discover.astro] Error fetching portfolio:", error);
+    console.error("[discover.astro] Error stack:", error.stack);
     return Astro2.redirect("/");
   }
-  return renderTemplate`${renderComponent($$result, "Layout", $$Layout, { "title": portfolio.metaTitle, "metaDescription": portfolio.metaDescription, "ogpImage": portfolio.ogpImage.url }, { "default": async ($$result2) => renderTemplate` ${maybeRenderHead()}<main> <h1>${portfolio.title}</h1> <p>${portfolio.modalDescription}</p> </main> ` })}`;
+  return renderTemplate`${renderComponent($$result, "Layout", $$Layout, { "title": portfolioData.metaTitle, "metaDescription": portfolioData.metaDescription, "ogpImage": portfolioData.ogpImage.url }, { "default": async ($$result2) => renderTemplate` ${maybeRenderHead()}<main> <h1>${portfolioData.title}</h1> <div>${unescapeHTML(portfolioData.modalDescription)}</div> </main> ` })}`;
 }, "C:/Users/marki/Documents/rhetenor-portfolio/src/pages/discover.astro", void 0);
 
 const $$file = "C:/Users/marki/Documents/rhetenor-portfolio/src/pages/discover.astro";

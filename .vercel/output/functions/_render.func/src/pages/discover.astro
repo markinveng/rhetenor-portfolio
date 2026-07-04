@@ -4,28 +4,46 @@ export const prerender = false;
 import Layout from '../layouts/Layout.astro';
 import { getPortfolioBySlug } from '../lib/microcms';
 
-const requestUrl = new URL(Astro.request.url);
-const slug = requestUrl.searchParams.get('name');
+// Astro.urlを使用してクエリパラメータを取得
+const slug = Astro.url.searchParams.get('name');
+
+console.log('[discover.astro] slug:', slug);
+console.log('[discover.astro] Full URL:', Astro.url.href);
 
 if (!slug) {
+  console.log('[discover.astro] No slug, redirecting to /');
   return Astro.redirect('/');
 }
 
-const { contents } = await getPortfolioBySlug(slug);
-const portfolio = contents[0];
+let portfolioData;
+try {
+  console.log('[discover.astro] Fetching portfolio for slug:', slug);
+  const { contents } = await getPortfolioBySlug(slug);
+  console.log('[discover.astro] API response contents length:', contents?.length);
+  
+  const portfolio = contents[0];
 
-if (!portfolio) {
+  if (!portfolio) {
+    console.log('[discover.astro] No portfolio found, redirecting to /');
+    return Astro.redirect('/');
+  }
+  
+  portfolioData = portfolio;
+  console.log('[discover.astro] Portfolio found:', portfolioData.title);
+} catch (error) {
+  console.error('[discover.astro] Error fetching portfolio:', error);
+  console.error('[discover.astro] Error stack:', error.stack);
   return Astro.redirect('/');
 }
 ---
 
 <Layout
-  title={portfolio.metaTitle}
-  metaDescription={portfolio.metaDescription}
-  ogpImage={portfolio.ogpImage.url}
+  title={portfolioData.metaTitle}
+  metaDescription={portfolioData.metaDescription}
+  ogpImage={portfolioData.ogpImage.url}
 >
   <main>
-    <h1>{portfolio.title}</h1>
-    <p>{portfolio.modalDescription}</p>
+    <h1>{portfolioData.title}</h1>
+    <div set:html={portfolioData.modalDescription} />
   </main>
 </Layout>
