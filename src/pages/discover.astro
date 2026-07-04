@@ -4,61 +4,25 @@ export const prerender = false;
 import Layout from '../layouts/Layout.astro';
 import { getPortfolioBySlug } from '../lib/microcms';
 
-// Astro.urlを使用してクエリパラメータを取得
 const slug = Astro.url.searchParams.get('name');
 
-console.log('[discover.astro] slug:', slug);
-console.log('[discover.astro] Full URL:', Astro.url.href);
-console.log('[discover.astro] Environment check:');
-console.log('[discover.astro] MICROCMS_SERVICE_DOMAIN:', import.meta.env.MICROCMS_SERVICE_DOMAIN ? 'set' : 'NOT SET');
-console.log('[discover.astro] MICROCMS_API_KEY:', import.meta.env.MICROCMS_API_KEY ? 'set' : 'NOT SET');
-
 if (!slug) {
-  console.log('[discover.astro] No slug, redirecting to /');
   return Astro.redirect('/');
 }
 
 let portfolioData;
-let errorMessage = '';
 try {
-  console.log('[discover.astro] Fetching portfolio for slug:', slug);
   const { contents } = await getPortfolioBySlug(slug);
-  console.log('[discover.astro] API response contents length:', contents?.length);
-  
   const portfolio = contents[0];
 
   if (!portfolio) {
-    console.log('[discover.astro] No portfolio found, redirecting to /');
     return Astro.redirect('/');
   }
   
   portfolioData = portfolio;
-  console.log('[discover.astro] Portfolio found:', portfolioData.title);
 } catch (error) {
-  console.error('[discover.astro] Error fetching portfolio:', error);
-  if (error instanceof Error) {
-    console.error('[discover.astro] Error message:', error.message);
-    console.error('[discover.astro] Error stack:', error.stack);
-    errorMessage = error.message;
-  } else {
-    errorMessage = String(error);
-  }
-  // デバッグ用：エラー時にリダイレクトせずエラーページを表示
-  return new Response(`
-    <html>
-      <head><title>Error - Debug</title></head>
-      <body>
-        <h1>Error loading portfolio</h1>
-        <p>Slug: ${slug}</p>
-        <p>Error: ${errorMessage}</p>
-        <p>Check Vercel function logs for more details</p>
-        <p><a href="/">Back to home</a></p>
-      </body>
-    </html>
-  `, {
-    status: 500,
-    headers: { 'Content-Type': 'text/html' }
-  });
+  console.error('Error fetching portfolio:', error);
+  return Astro.redirect('/');
 }
 ---
 
