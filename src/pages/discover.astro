@@ -2,7 +2,7 @@
 export const prerender = false;
 
 import Layout from '../layouts/Layout.astro';
-import { getPortfolioBySlug, urlFor } from '../lib/microcms';
+import { getPortfolioBySlug, urlFor } from '../lib/sanity';
 
 const slug = Astro.url.searchParams.get('name');
 
