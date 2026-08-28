@@ -1,7 +1,7 @@
 ---
 import Layout from '../layouts/Layout.astro';
 import WaterBackground from '../components/WaterBackground/WaterBackground.astro';
-import { getPortfolioList } from '../lib/sanity';
+import { getPortfolioList } from '../ts/Sanity/sanity';
 
 const contents = await getPortfolioList();
 ---

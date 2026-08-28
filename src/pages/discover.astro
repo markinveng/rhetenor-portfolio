@@ -2,7 +2,7 @@
 export const prerender = false;
 
 import Layout from '../layouts/Layout.astro';
-import { getPortfolioBySlug, urlFor } from '../lib/sanity';
+import { getPortfolioBySlug, urlFor } from '../ts/Sanity/sanity';
 
 const slug = Astro.url.searchParams.get('name');
 
