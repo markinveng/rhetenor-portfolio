@@ -2,11 +2,14 @@
   "cSpell.words": [
     "Equirectangular",
     "FXAA",
+    "glslify",
     "GLTF",
+    "mdcs",
     "metalness",
     "palt",
     "raycaster",
     "rhetenor",
     "webgpu"
-  ]
+  ],
+  "terminal.integrated.enableFileLinks": "off"
 }
