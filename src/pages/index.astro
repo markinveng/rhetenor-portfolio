@@ -7,7 +7,7 @@ const contents = await getPortfolioList();
 ---
 
 <Layout>
-	<!-- <WaterBackground /> -->
+	<WaterBackground />
 	<nav>
 		{contents.map((item) => (
 			<a href={`/discover?name=${item.slug.current}`}>{item.title}</a>
