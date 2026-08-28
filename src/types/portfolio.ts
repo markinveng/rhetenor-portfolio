@@ -1,31 +1,37 @@
-import type { MicroCMSImage, MicroCMSListContent } from 'microcms-js-sdk';
-
 export type AccentTextColor = 'dark' | 'light';
 
+export interface SanityImage {
+  _type: 'image';
+  asset: { _ref: string; _type: 'reference' };
+  hotspot?: { x: number; y: number };
+}
+
 export interface StorySection {
-  fieldId: 'storySection';
+  _key: string;
   stepTitle: string;
-  image: MicroCMSImage;
+  image: SanityImage;
   caption: string;
 }
 
 export interface GalleryImage {
-  fieldId: 'galleryImages';
-  image: MicroCMSImage;
+  _key: string;
+  image: SanityImage;
   alt: string;
 }
 
-export interface Portfolio extends MicroCMSListContent {
-  slug: string;
+export interface Portfolio {
+  _id: string;
+  _type: 'portfolio';
+  slug: { current: string };
   title: string;
   publishedAtCustom: string;
-  thumbnail: MicroCMSImage;
+  thumbnail: SanityImage;
   modalDescription: string;
   themeColor: string;
-  accentTextColor: AccentTextColor[];
+  accentTextColor: AccentTextColor;
   storySections: StorySection[];
   galleryImages: GalleryImage[];
   metaTitle: string;
   metaDescription: string;
-  ogpImage: MicroCMSImage;
+  ogpImage: SanityImage;
 }

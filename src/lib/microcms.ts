@@ -1,25 +1,22 @@
-import { createClient } from 'microcms-js-sdk';
-import type { MicroCMSListResponse } from 'microcms-js-sdk';
-import type { Portfolio } from '../types/portfolio';
+import { createClient } from '@sanity/client';
+import imageUrlBuilder from '@sanity/image-url';
+import type { SanityImage, Portfolio } from '../types/portfolio';
 
-const serviceDomain = import.meta.env.MICROCMS_SERVICE_DOMAIN;
-const apiKey = import.meta.env.MICROCMS_API_KEY;
+export const client = createClient({
+  projectId: import.meta.env.SANITY_PROJECT_ID,
+  dataset: 'production',
+  useCdn: true,
+  apiVersion: '2024-01-01',
+});
 
-if (!serviceDomain || !apiKey) {
-  throw new Error('MICROCMS_SERVICE_DOMAIN / MICROCMS_API_KEY is not set in .env');
-}
+const builder = imageUrlBuilder(client);
+export const urlFor = (source: SanityImage) => builder.image(source);
 
-export const client = createClient({ serviceDomain, apiKey });
+export const getPortfolioList = (): Promise<Portfolio[]> =>
+  client.fetch(`*[_type == "portfolio"] | order(_createdAt desc)`);
 
-export const getPortfolioList = () => client.getList<Portfolio>({ endpoint: 'portfolio' });
+export const getPortfolioDetail = (id: string): Promise<Portfolio> =>
+  client.fetch(`*[_type == "portfolio" && _id == $id][0]`, { id });
 
-export const getPortfolioDetail = (contentId: string) =>
-  client.getListDetail<Portfolio>({ endpoint: 'portfolio', contentId });
-
-export const getPortfolioBySlug = (slug: string) =>
-  client.getList<Portfolio>({
-    endpoint: 'portfolio',
-    queries: { filters: `slug[equals]${slug}` },
-  });
-
-export type PortfolioListResponse = MicroCMSListResponse<Portfolio>;
+export const getPortfolioBySlug = (slug: string): Promise<Portfolio> =>
+  client.fetch(`*[_type == "portfolio" && slug.current == $slug][0]`, { slug });

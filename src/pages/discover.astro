@@ -2,7 +2,7 @@
 export const prerender = false;
 
 import Layout from '../layouts/Layout.astro';
-import { getPortfolioBySlug } from '../lib/microcms';
+import { getPortfolioBySlug, urlFor } from '../lib/microcms';
 
 const slug = Astro.url.searchParams.get('name');
 
@@ -12,8 +12,7 @@ if (!slug) {
 
 let portfolioData;
 try {
-  const { contents } = await getPortfolioBySlug(slug);
-  const portfolio = contents[0];
+  const portfolio = await getPortfolioBySlug(slug);
 
   if (!portfolio) {
     return Astro.redirect('/');
@@ -29,11 +28,11 @@ try {
 <Layout
   title={portfolioData.metaTitle}
   metaDescription={portfolioData.metaDescription}
-  ogpImage={portfolioData.ogpImage.url}
+  ogpImage={urlFor(portfolioData.ogpImage).url()}
 >
   <main>
     <h1>{portfolioData.title}</h1>
-    <div set:html={portfolioData.modalDescription} />
+    <p>{portfolioData.modalDescription}</p>
   </main>
 </Layout>
 </Layout>

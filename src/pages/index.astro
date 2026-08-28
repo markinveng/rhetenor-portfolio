@@ -3,14 +3,14 @@ import Layout from '../layouts/Layout.astro';
 import WaterBackground from '../components/WaterBackground/WaterBackground.astro';
 import { getPortfolioList } from '../lib/microcms';
 
-const { contents } = await getPortfolioList();
+const contents = await getPortfolioList();
 ---
 
 <Layout>
 	<!-- <WaterBackground /> -->
 	<nav>
 		{contents.map((item) => (
-			<a href={`/discover?name=${item.slug}`}>{item.title}</a>
+			<a href={`/discover?name=${item.slug.current}`}>{item.title}</a>
 		))}
 	</nav>
 </Layout>
