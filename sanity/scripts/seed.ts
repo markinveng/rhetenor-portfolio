@@ -6,7 +6,7 @@ import { resolve } from 'node:path'
 
 const client = getCliClient()
 
-const COUNT = 20
+const COUNT = 40
 
 const portableText = (text: string, key: string) => [
   {
@@ -77,7 +77,44 @@ async function seed() {
         Math.min(i, 28),
       ).padStart(2, '0')}`,
 
-      thumbnail: image,
+      // サムネイルは画像/Vimeo動画をランダムで割り当てる
+      thumbnailMedia:
+        Math.random() < 0.3
+          ? {
+            _type: 'mediaItem',
+            type: 'vimeo',
+            vimeoUrl: 'https://vimeo.com/1094266104',
+          }
+          : {
+            _type: 'mediaItem',
+            type: 'img',
+            image,
+            alt: `Sample Project ${number}`,
+          },
+
+      // サムネイルクリック後のメディア一覧(先頭はVimeo動画)
+      previewMedia: [
+        {
+          _type: 'mediaItem',
+          _key: `preview-${i}-vimeo`,
+          type: 'vimeo',
+          vimeoUrl: 'https://vimeo.com/1094266104',
+        },
+        {
+          _type: 'mediaItem',
+          _key: `preview-${i}-01`,
+          type: 'img',
+          image,
+          alt: `Sample Project ${number} Preview 1`,
+        },
+        {
+          _type: 'mediaItem',
+          _key: `preview-${i}-02`,
+          type: 'img',
+          image,
+          alt: `Sample Project ${number} Preview 2`,
+        },
+      ],
 
       modalDescription:
         `サンプル作品${number}の説明文です。ポートフォリオ一覧・モーダル表示確認用のダミーテキストです。`,
@@ -92,10 +129,26 @@ async function seed() {
       accentTextColor:
         i % 2 === 0 ? 'dark' : 'light',
 
+      // 関連URL(Spotify / YouTube / Websiteなど)
+      relatedLinks: [
+        {
+          _type: 'relatedLink',
+          _key: `related-${i}-youtube`,
+          label: 'YouTube',
+          url: 'https://youtube.com/',
+        },
+        {
+          _type: 'relatedLink',
+          _key: `related-${i}-web`,
+          label: 'Website',
+          url: 'https://example.com/',
+        },
+      ],
+
       // Story
       ...(hasStory && {
         story: {
-          _type: 'object',
+          _type: 'story',
 
           items: [
             {
@@ -152,7 +205,7 @@ async function seed() {
       // Concept
       ...(hasConcept && {
         concept: {
-          _type: 'object',
+          _type: 'concept',
 
           body: portableText(
             `Sample Project ${number}では、日常の中にある小さな発見を視覚的に表現することをコンセプトとしています。`,
@@ -168,7 +221,7 @@ async function seed() {
       // Gallery
       ...(hasGallery && {
         gallery: {
-          _type: 'object',
+          _type: 'gallery',
 
           images: Array.from(
             { length: 6 },
@@ -179,8 +232,7 @@ async function seed() {
               image,
 
               alt:
-                `Sample Project ${number} Gallery ${
-                  galleryIndex + 1
+                `Sample Project ${number} Gallery ${galleryIndex + 1
                 }`,
             }),
           ),
@@ -190,7 +242,7 @@ async function seed() {
       // Credits
       ...(hasCredits && {
         credits: {
-          _type: 'object',
+          _type: 'credit',
 
           people: [
             {
@@ -203,14 +255,14 @@ async function seed() {
 
               links: [
                 {
-                  _type: 'object',
+                  _type: 'relatedLink',
                   _key: `credit-${i}-01-x`,
                   label: 'X',
                   url: 'https://x.com/',
                 },
 
                 {
-                  _type: 'object',
+                  _type: 'relatedLink',
                   _key: `credit-${i}-01-web`,
                   label: 'Website',
                   url: 'https://example.com/',
@@ -228,7 +280,7 @@ async function seed() {
 
               links: [
                 {
-                  _type: 'object',
+                  _type: 'relatedLink',
                   _key: `credit-${i}-02-instagram`,
                   label: 'Instagram',
                   url: 'https://instagram.com/',

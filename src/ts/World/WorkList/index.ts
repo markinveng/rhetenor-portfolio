@@ -5,8 +5,8 @@ import { Draggable } from "gsap/Draggable";
 // @ts-ignore
 import { InertiaPlugin } from "gsap/InertiaPlugin";
 
-import { urlFor } from "../../Sanity";
-
+import { urlFor } from "../../Sanity"; import { fetchVimeoInfo } from "../../utils/vimeo";
+import { HoverInvertCursor } from "../../utils/HoverInvertCursor";
 gsap.registerPlugin(Draggable, InertiaPlugin);
 
 /**
@@ -35,6 +35,9 @@ export class WorkList {
 
   private suppressClick = false;
 
+  private cursor: HoverInvertCursor | null = null;
+  private videoObserver: IntersectionObserver | null = null;
+
   constructor(root: HTMLElement) {
     this.root = root;
 
@@ -58,6 +61,7 @@ export class WorkList {
     this.buildColumns();
     this.initAnimation();
     this.initDrag();
+    this.cursor = new HoverInvertCursor(document.body);
     this.initHover();
     this.initClickGuard();
     this.initResizeObserver();
@@ -65,16 +69,17 @@ export class WorkList {
 
   /**
    * data-image-ref から Sanity の画像URLを解決して背景に設定する。
+   * data-vimeo-url は画面に入ってからiframeを生成して自動再生する(遅延読み込み)。
    */
   private resolveMedia(): void {
     this.items.forEach((item) => {
-      const media = item.querySelector<HTMLElement>(
+      const imageMedia = item.querySelector<HTMLElement>(
         "[data-image-ref]",
       );
 
-      const ref = media?.dataset.imageRef;
+      const ref = imageMedia?.dataset.imageRef;
 
-      if (media && ref) {
+      if (imageMedia && ref) {
         const url = urlFor({
           _type: "image",
           asset: { _type: "reference", _ref: ref },
@@ -82,9 +87,75 @@ export class WorkList {
           .width(600)
           .url();
 
-        media.style.backgroundImage = `url(${url})`;
+        imageMedia.style.backgroundImage = `url(${url})`;
+      }
+
+      const videoMedia = item.querySelector<HTMLElement>(
+        "[data-vimeo-url]",
+      );
+
+      const vimeoUrl = videoMedia?.dataset.vimeoUrl;
+
+      if (videoMedia && vimeoUrl) {
+        this.observeVideo(videoMedia, vimeoUrl);
       }
     });
+  }
+
+  /**
+   * 動画は画面内に入ってから読み込む(多数のiframeを同時再生しないための対策)。
+   * 処理負荷が気になる場合は、この閾値/rootMarginを調整するか
+   * ホバー時にのみ読み込む方式に変更してください。
+   */
+  private observeVideo(target: HTMLElement, vimeoUrl: string): void {
+    if (!this.videoObserver) {
+      this.videoObserver = new IntersectionObserver(
+        (entries) => {
+          entries.forEach((entry) => {
+            if (!entry.isIntersecting) {
+              return;
+            }
+
+            const el = entry.target as HTMLElement;
+            const url = el.dataset.vimeoUrl;
+
+            this.videoObserver?.unobserve(el);
+
+            if (url) {
+              this.loadVideo(el, url);
+            }
+          });
+        },
+        {
+          root: this.root,
+          rootMargin: "200px",
+        },
+      );
+    }
+
+    this.videoObserver.observe(target);
+  }
+
+  private async loadVideo(
+    target: HTMLElement,
+    vimeoUrl: string,
+  ): Promise<void> {
+    const info = await fetchVimeoInfo(vimeoUrl);
+
+    if (!info) {
+      return;
+    }
+
+    if (info.posterUrl) {
+      target.style.backgroundImage = `url(${info.posterUrl})`;
+    }
+
+    const iframe = document.createElement("iframe");
+    iframe.src = info.embedUrl;
+    iframe.allow = "autoplay; fullscreen";
+    iframe.setAttribute("loading", "lazy");
+
+    target.appendChild(iframe);
   }
 
   /**
@@ -236,7 +307,8 @@ export class WorkList {
   }
 
   /**
-   * Hover Animation。ここはGSAP。
+   * Hover Animation。拡大はGSAP、
+   * カーソルの追従・色反転オーバーは HoverInvertCursor に任せる。
    */
   private initHover(): void {
     this.items.forEach((item) => {
@@ -248,13 +320,20 @@ export class WorkList {
         return;
       }
 
-      const handleEnter = () => {
+      const handleEnter = (event: PointerEvent) => {
         gsap.to(media, {
-          scale: 0.96,
+          scale: 1.08,
           duration: 0.6,
           ease: "power3.out",
           overwrite: true,
         });
+
+        const label = item.dataset.slug ? "Discover →" : "Back →";
+        this.cursor?.enter(media, label, event.clientX, event.clientY);
+      };
+
+      const handleMove = (event: PointerEvent) => {
+        this.cursor?.move(event.clientX, event.clientY);
       };
 
       const handleLeave = () => {
@@ -264,13 +343,17 @@ export class WorkList {
           ease: "power3.out",
           overwrite: true,
         });
+
+        this.cursor?.leave();
       };
 
       item.addEventListener("pointerenter", handleEnter);
+      item.addEventListener("pointermove", handleMove);
       item.addEventListener("pointerleave", handleLeave);
 
       this.hoverCleanups.push(() => {
         item.removeEventListener("pointerenter", handleEnter);
+        item.removeEventListener("pointermove", handleMove);
         item.removeEventListener("pointerleave", handleLeave);
       });
     });
@@ -354,6 +437,12 @@ export class WorkList {
 
     this.hoverCleanups.forEach((cleanup) => cleanup());
     this.hoverCleanups = [];
+
+    this.cursor?.destroy();
+    this.cursor = null;
+
+    this.videoObserver?.disconnect();
+    this.videoObserver = null;
 
     this.root.removeEventListener("click", this.handleClick, true);
 

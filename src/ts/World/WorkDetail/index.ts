@@ -1,7 +1,10 @@
 import gsap from "gsap";
 import Lenis from "lenis";
+import { navigate } from "astro:transitions/client";
 
 import { PortfolioApi, urlFor } from "../../Sanity";
+import { fetchVimeoInfo } from "../../utils/vimeo";
+import { HoverInvertCursor } from "../../utils/HoverInvertCursor";
 import type {
   MediaItem,
   Portfolio,
@@ -20,38 +23,36 @@ interface OpenEventDetail {
   media: HTMLElement;
 }
 
+interface ResolvedMedia {
+  kind: "image" | "vimeo";
+  posterUrl: string | null;
+  embedUrl?: string;
+  aspectRatio?: number;
+}
+
 /**
- * Sanityの画像、またはVimeoのサムネイル画像URLを解決する。
- * VimeoはoEmbed APIから動画のサムネイル画像を取得する。
+ * Sanityの画像、またはVimeo動画情報(サムネイル・埋め込みURL・比率)を解決する。
  */
-async function resolveMediaUrl(
-  media: MediaItem,
-): Promise<string | null> {
+async function resolveMedia(media: MediaItem): Promise<ResolvedMedia> {
   if (media.type === "img") {
-    return urlFor(media.image).width(1200).url();
-  }
-
-  try {
-    const response = await fetch(
-      `https://vimeo.com/api/oembed.json?url=${encodeURIComponent(
-        media.vimeoUrl,
-      )}`,
-    );
-
-    if (!response.ok) {
-      return null;
-    }
-
-    const data = (await response.json()) as {
-      thumbnail_url?: string;
+    return {
+      kind: "image",
+      posterUrl: urlFor(media.image).width(1200).url(),
     };
-
-    return typeof data.thumbnail_url === "string"
-      ? data.thumbnail_url
-      : null;
-  } catch {
-    return null;
   }
+
+  const info = await fetchVimeoInfo(media.vimeoUrl);
+
+  if (!info) {
+    return { kind: "vimeo", posterUrl: null };
+  }
+
+  return {
+    kind: "vimeo",
+    posterUrl: info.posterUrl,
+    embedUrl: info.embedUrl,
+    aspectRatio: info.aspectRatio,
+  };
 }
 
 interface DragState {
@@ -81,8 +82,8 @@ export class WorkDetail {
 
   private currentSlug: string | null = null;
   private originMediaEl: HTMLElement | null = null;
+  private originItemEl: HTMLElement | null = null;
 
-  private mediaUrls: Array<string | null> = [];
   private mediaCount = 0;
   private hasLoop = false;
   private activeRealIndex = 0;
@@ -96,6 +97,10 @@ export class WorkDetail {
 
   /** ドラッグ後の誤クリック(意図しないスライド遷移)を防ぐフラグ */
   private suppressSlideClick = false;
+
+  private cursor: HoverInvertCursor | null = null;
+
+  private mediaInfos: ResolvedMedia[] = [];
 
   constructor(root: HTMLElement) {
     this.root = root;
@@ -127,9 +132,11 @@ export class WorkDetail {
      */
     this.resetState();
 
+    this.cursor = new HoverInvertCursor(document.body);
+
     document.addEventListener(
       "worklist:open",
-      this.handleOpen as EventListener,
+      this.handleOpen as unknown as EventListener,
     );
 
     this.closeEl.addEventListener("click", this.closeToOrigin);
@@ -154,6 +161,17 @@ export class WorkDetail {
 
     this.currentSlug = slug;
     this.originMediaEl = media;
+    this.originItemEl = media.closest<HTMLElement>(
+      "[data-portfolio-item]",
+    );
+
+    /*
+     * 背景のWorkList側に選択した作品がそのまま(薄く)残って
+     * 二重に見えてしまうため、選択元だけは完全に隠す。
+     */
+    if (this.originItemEl) {
+      this.originItemEl.style.visibility = "hidden";
+    }
 
     this.root.classList.add("is-open");
     this.root.setAttribute("aria-hidden", "false");
@@ -252,8 +270,8 @@ export class WorkDetail {
       ...(portfolio.previewMedia ?? []),
     ];
 
-    this.mediaUrls = await Promise.all(
-      mediaList.map((media) => resolveMediaUrl(media)),
+    this.mediaInfos = await Promise.all(
+      mediaList.map((media) => resolveMedia(media)),
     );
 
     this.mediaCount = mediaList.length;
@@ -317,17 +335,15 @@ export class WorkDetail {
       { length: extendedCount },
       (_, extIndex) => {
         const realIndex = this.toRealIndex(extIndex);
+        const info = this.mediaInfos[realIndex];
 
         const slide = document.createElement("div");
         slide.className = "work-detail__slide";
-
-        const url = this.mediaUrls[realIndex];
-
-        if (url) {
-          slide.style.backgroundImage = `url(${url})`;
-        }
-
         slide.addEventListener("click", this.navigateToWork);
+
+        const mediaEl = this.createSlideMediaElement(info);
+        this.attachSlideHover(mediaEl);
+        slide.appendChild(mediaEl);
 
         this.scrollEl.appendChild(slide);
 
@@ -349,6 +365,55 @@ export class WorkDetail {
         { passive: true },
       );
     }
+  }
+
+  /**
+   * 画像は横幅に合わせてcontain、動画はVimeoの比率でiframeを敷き詰める。
+   * どちらもwork-detail__slide内で中央寄せされる。
+   */
+  private createSlideMediaElement(info: ResolvedMedia): HTMLElement {
+    if (info.kind === "vimeo" && info.embedUrl) {
+      const wrapper = document.createElement("div");
+      wrapper.className = "work-detail__slide-video";
+      wrapper.style.aspectRatio = `${info.aspectRatio ?? 16 / 9}`;
+
+      const iframe = document.createElement("iframe");
+      iframe.src = info.embedUrl;
+      iframe.allow = "autoplay; fullscreen";
+      iframe.setAttribute("loading", "lazy");
+
+      wrapper.appendChild(iframe);
+
+      return wrapper;
+    }
+
+    const media = document.createElement("div");
+    media.className = "work-detail__slide-media";
+
+    if (info.posterUrl) {
+      media.style.backgroundImage = `url(${info.posterUrl})`;
+    }
+
+    return media;
+  }
+
+  private attachSlideHover(mediaEl: HTMLElement): void {
+    const handleEnter = (event: PointerEvent): void => {
+      const label = this.currentSlug ? "Discover →" : "Back →";
+      this.cursor?.enter(mediaEl, label, event.clientX, event.clientY);
+    };
+
+    const handleMove = (event: PointerEvent): void => {
+      this.cursor?.move(event.clientX, event.clientY);
+    };
+
+    const handleLeave = (): void => {
+      this.cursor?.leave();
+    };
+
+    mediaEl.addEventListener("pointerenter", handleEnter);
+    mediaEl.addEventListener("pointermove", handleMove);
+    mediaEl.addEventListener("pointerleave", handleLeave);
   }
 
   /**
@@ -390,7 +455,7 @@ export class WorkDetail {
   private buildRail(title: string): void {
     this.railEl.innerHTML = "";
 
-    this.railItemEls = this.mediaUrls.map((url, index) => {
+    this.railItemEls = this.mediaInfos.map((info, index) => {
       const railItem = document.createElement("button");
       railItem.type = "button";
       railItem.className = "work-detail__rail-item";
@@ -399,8 +464,8 @@ export class WorkDetail {
         `${title} ${index + 1}`,
       );
 
-      if (url) {
-        railItem.style.backgroundImage = `url(${url})`;
+      if (info.posterUrl) {
+        railItem.style.backgroundImage = `url(${info.posterUrl})`;
       }
 
       railItem.addEventListener("click", () => {
@@ -473,20 +538,22 @@ export class WorkDetail {
 
     const slug = this.currentSlug;
 
-    if (!slug) {
-      window.location.href = "/error";
-      return;
-    }
+    const targetUrl = slug
+      ? `/discover?prov=${encodeURIComponent(slug)}`
+      : "/error";
 
-    const targetUrl = `/discover?prov=${encodeURIComponent(slug)}`;
-
+    /*
+     * Astroのnavigate()でSPA的に遷移させることで、
+     * ClientRouterによるView Transitions(フェード)と
+     * 通常のブラウザバック/フォワードの両方が破綻なく機能する。
+     */
     const lenis = new Lenis({ autoRaf: true });
 
     lenis.scrollTo(0, {
       duration: 0.8,
       onComplete: () => {
         lenis.destroy();
-        window.location.href = targetUrl;
+        navigate(targetUrl);
       },
     });
   };
@@ -515,13 +582,38 @@ export class WorkDetail {
       return;
     }
 
-    const activeUrl = this.mediaUrls[this.activeRealIndex] ?? null;
+    const activeUrl = this.mediaInfos[this.activeRealIndex]?.posterUrl ?? null;
+    const originUrl = this.originMediaEl?.style.backgroundImage || null;
+
+    /*
+     * サムネイル以外(previewMediaの2枚目以降)を見ている状態で戻る場合、
+     * 表示中の画像とサムネイル画像が異なるため、位置アニメーションの終盤で
+     * 画像自体もクロスフェードさせて突然の切り替わりを防ぐ。
+     */
+    const needsCrossfade =
+      this.activeRealIndex !== 0 && !!originUrl && originUrl !== "none";
 
     const hero = document.createElement("div");
     hero.className = "work-detail__hero";
 
+    const currentLayer = document.createElement("div");
+    currentLayer.className = "work-detail__hero-layer";
+
     if (activeUrl) {
-      hero.style.backgroundImage = `url(${activeUrl})`;
+      currentLayer.style.backgroundImage = `url(${activeUrl})`;
+    }
+
+    hero.appendChild(currentLayer);
+
+    let targetLayer: HTMLElement | null = null;
+
+    if (needsCrossfade) {
+      targetLayer = document.createElement("div");
+      targetLayer.className = "work-detail__hero-layer";
+      targetLayer.style.backgroundImage = originUrl as string;
+      targetLayer.style.opacity = "0";
+
+      hero.appendChild(targetLayer);
     }
 
     hero.style.top = "0px";
@@ -531,18 +623,37 @@ export class WorkDetail {
 
     document.body.appendChild(hero);
 
-    gsap.to(hero, {
-      top: originRect.top,
-      left: originRect.left,
-      width: originRect.width,
-      height: originRect.height,
-      duration: 0.7,
-      ease: "power3.inOut",
+    const timeline = gsap.timeline({
       onComplete: () => {
         hero.remove();
         this.resetState();
       },
     });
+
+    timeline.to(
+      hero,
+      {
+        top: originRect.top,
+        left: originRect.left,
+        width: originRect.width,
+        height: originRect.height,
+        duration: 0.7,
+        ease: "power3.inOut",
+      },
+      0,
+    );
+
+    if (targetLayer) {
+      timeline.to(
+        targetLayer,
+        {
+          opacity: 1,
+          duration: 0.3,
+          ease: "power2.out",
+        },
+        0.4,
+      );
+    }
   };
 
   /**
@@ -632,13 +743,18 @@ export class WorkDetail {
 
     this.slideEls = [];
     this.railItemEls = [];
-    this.mediaUrls = [];
+    this.mediaInfos = [];
     this.mediaCount = 0;
     this.hasLoop = false;
     this.activeRealIndex = 0;
 
     this.currentSlug = null;
     this.originMediaEl = null;
+
+    if (this.originItemEl) {
+      this.originItemEl.style.visibility = "";
+      this.originItemEl = null;
+    }
   }
 
   /**
@@ -741,7 +857,7 @@ export class WorkDetail {
   public destroy(): void {
     document.removeEventListener(
       "worklist:open",
-      this.handleOpen as EventListener,
+      this.handleOpen as unknown as EventListener,
     );
 
     this.closeEl.removeEventListener("click", this.closeToOrigin);
@@ -757,6 +873,9 @@ export class WorkDetail {
       "scroll",
       this.handleInfiniteScroll,
     );
+
+    this.cursor?.destroy();
+    this.cursor = null;
 
     this.slideObserver?.disconnect();
     this.heroEl?.remove();
