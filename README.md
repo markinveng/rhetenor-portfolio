@@ -122,7 +122,7 @@ npx sanity@latest exec scripts/seed.ts --with-user-token
 
 サンプルデータの削除
 ```sh
-npx sanity@latest exec scripts/seed.ts --with-user-token
+npx sanity@latest exec scripts/clearSeed.ts --with-user-token
 ```
 
 ## 🧞 コマンド一覧
