@@ -29,7 +29,7 @@ const { portfolios } = Astro.props;
           aria-label={`${portfolio.title}を開く`}
         >
           {
-            portfolio.thumbnailMedia.type === 'img' && (
+            portfolio.thumbnailMedia?.type === 'img' && (
               <div
                 class="portfolio-canvas__media"
                 data-image-ref={
@@ -40,7 +40,7 @@ const { portfolios } = Astro.props;
           }
 
           {
-            portfolio.thumbnailMedia.type === 'vimeo' && (
+            portfolio.thumbnailMedia?.type === 'vimeo' && (
               <div
                 class="portfolio-canvas__media"
                 data-vimeo-url={
