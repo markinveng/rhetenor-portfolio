@@ -2,17 +2,17 @@ import {defineField, defineType} from 'sanity'
 
 export default defineType({
   name: 'author',
-  title: 'Author',
+  title: '著者',
   type: 'document',
   fields: [
     defineField({
       name: 'name',
-      title: 'Name',
+      title: '名前',
       type: 'string',
     }),
     defineField({
       name: 'slug',
-      title: 'Slug',
+      title: 'URLスラッグ',
       type: 'slug',
       options: {
         source: 'name',
@@ -21,7 +21,7 @@ export default defineType({
     }),
     defineField({
       name: 'image',
-      title: 'Image',
+      title: '画像',
       type: 'image',
       options: {
         hotspot: true,
@@ -29,7 +29,7 @@ export default defineType({
     }),
     defineField({
       name: 'bio',
-      title: 'Bio',
+      title: 'プロフィール文',
       type: 'array',
       of: [
         {
