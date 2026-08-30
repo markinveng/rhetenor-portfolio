@@ -3,9 +3,6 @@ dist/
 .vercel/
 .wrangler/
 
-# migration artifact
-microcms-export.json
-
 # generated types
 .astro/
 
@@ -20,6 +17,7 @@ pnpm-debug.log*
 
 # environment variables
 .env
+.env.development
 .env.production
 .env.local
 .env.*.local

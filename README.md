@@ -5,7 +5,9 @@ Astro + Sanity(CMS) 構成のポートフォリオサイトです。
 - フロントエンド: `/` (Astro, Cloudflare Adapter)
 - CMS: `/sanity` (Sanity Studio, 独立したプロジェクトとして管理)
 
-フロントエンドはSanityの `production` dataset(projectId: `si0urca2`)からコンテンツを取得して表示します。Studio(管理画面)は https://rhetenor-portfolio.sanity.studio/ にデプロイ済みで、権限を持つメンバーはローカル環境なしにブラウザから直接コンテンツを編集できます。
+フロントエンドはSanityのdatasetからコンテンツを取得して表示します。Sanity上のdatasetは `development` と `production` に分かれており、どちらを使うかは環境変数(`.env.development` / `.env.production`)で切り替えます。Studio(管理画面)は https://rhetenor-portfolio.sanity.studio/ にデプロイ済みで、権限を持つメンバーはローカル環境なしにブラウザから直接コンテンツを編集できます(本番Studioは `production` dataset を編集します)。
+
+> `.gitignore` されていない場所にprojectIdなどのIDを直書きしないでください。projectId/datasetは必ず `.env.*` ファイル(gitignore対象)経由で参照します。
 
 ## 🚀 環境構築
 
@@ -29,15 +31,24 @@ volta install node
 ```sh
 npm install
 
-# 環境変数を用意する
-cp .env.example .env
+# 環境変数を用意する(development用・production用それぞれ)
+cp .env.example .env.development
+cp .env.example .env.production
 ```
 
-`.env` に SanityのプロジェクトIDを設定します。
+`.env.example` を参考に、SanityのプロジェクトIDとdatasetを設定します。`SANITY_PROJECT_ID` はdevelopment/productionで共通、`SANITY_DATASET` のみ環境ごとに変えます。
 
 ```
-SANITY_PROJECT_ID=si0urca2
+# .env.development
+SANITY_PROJECT_ID=プロジェクトID
+SANITY_DATASET=development
+
+# .env.production
+SANITY_PROJECT_ID=プロジェクトID
+SANITY_DATASET=production
 ```
+
+`npm run dev` は `.env.development` を、`npm run build` は `.env.production` を自動的に読み込みます(Astro/Viteの標準の仕組みで、`--mode` を指定しない限りコマンドに応じて自動選択されます)。いずれも `.gitignore` 対象なので、値はチームメンバー間で別途共有してください。
 
 開発サーバーを起動します。
 
@@ -62,9 +73,26 @@ Sanityアカウントへのログインが必要です(初回のみ、ブラウ�
 npx sanity login
 ```
 
-> ログインするアカウントは、あらかじめプロジェクトオーナーからメンバー招待(https://www.sanity.io/manage/project/si0urca2 のMembersタブ)を受けている必要があります。招待されていない場合は権限エラーになります。
+> ログインするアカウントは、あらかじめプロジェクトオーナーからメンバー招待(https://www.sanity.io/manage/project/プロジェクトID のMembersタブ)を受けている必要があります。招待されていない場合は権限エラーになります。
 
-開発サーバー(ローカルのStudio)を起動します。
+環境変数を用意します(`sanity/.env.example` を参考に)。Studio側はViteベースのため、変数名に `SANITY_STUDIO_` プレフィックスが必要です。
+
+```sh
+cp .env.example .env.development
+cp .env.example .env.production
+```
+
+```
+# sanity/.env.development
+SANITY_STUDIO_PROJECT_ID=プロジェクトID
+SANITY_STUDIO_DATASET=development
+
+# sanity/.env.production
+SANITY_STUDIO_PROJECT_ID=プロジェクトID
+SANITY_STUDIO_DATASET=production
+```
+
+開発サーバー(ローカルのStudio)を起動します。`npm run dev` は development dataset、`npm run build`/`npm run deploy` は production dataset を対象にします。
 
 ```sh
 npm run dev
@@ -81,6 +109,17 @@ npm run deploy
 ```
 
 コンテンツの値(記事の中身など)を変えるだけなら、上記のURLから直接編集すればよく、デプロイは不要です。
+
+### サンプルデータの作成・削除
+サンプルデータの作成
+```sh
+npx sanity@latest exec scripts/seed.ts --with-user-token
+```
+
+サンプルデータの削除
+```sh
+npx sanity@latest exec scripts/seed.ts --with-user-token
+```
 
 ## 🧞 コマンド一覧
 
@@ -131,4 +170,4 @@ npm run deploy
 
 - [Astro Docs](https://docs.astro.build)
 - [Sanity Docs](https://www.sanity.io/docs)
-- Sanity管理画面(メンバー招待・API設定など): https://www.sanity.io/manage/project/si0urca2
+- Sanity管理画面(メンバー招待・API設定など): https://www.sanity.io/manage/project/プロジェクトID

@@ -1,10 +1,10 @@
 import { createClient } from '@sanity/client';
 import imageUrlBuilder from '@sanity/image-url';
-import type { SanityImage, Portfolio } from '../types/portfolio';
+import type { SanityImage, Portfolio } from '../../types/portfolio';
 
 export const client = createClient({
   projectId: import.meta.env.SANITY_PROJECT_ID,
-  dataset: 'production',
+  dataset: import.meta.env.SANITY_DATASET,
   useCdn: true,
   apiVersion: '2024-01-01',
 });

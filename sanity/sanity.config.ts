@@ -7,8 +7,8 @@ export default defineConfig({
   name: 'default',
   title: 'rhetenor-portfolio',
 
-  projectId: 'si0urca2',
-  dataset: 'production',
+  projectId: import.meta.env.SANITY_STUDIO_PROJECT_ID,
+  dataset: import.meta.env.SANITY_STUDIO_DATASET,
 
   plugins: [structureTool(), visionTool()],
 
