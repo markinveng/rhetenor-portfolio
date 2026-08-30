@@ -32,7 +32,7 @@ export const portfolioType = defineType({
     }),
 
     defineField({
-      name: 'thumbnail',
+      name: 'thumbnailImg',
       title: 'サムネイル画像',
       type: 'image',
       options: {
@@ -41,9 +41,47 @@ export const portfolioType = defineType({
     }),
 
     defineField({
-      name: 'modalDescription',
-      title: 'モーダル説明文',
+      name: 'thumbnailMovie',
+      title: 'サムネイル動画',
       type: 'text',
+    }),
+
+    defineField({
+      name: 'imgList',
+      title: 'サムネイル画像リスト',
+      type: 'object',
+
+      fields: [
+        defineField({
+          name: 'images',
+          title: 'サムネイル画像リスト',
+          type: 'array',
+
+          of: [
+            defineArrayMember({
+              type: 'object',
+
+              fields: [
+                defineField({
+                  name: 'image',
+                  title: 'サムネイル画像',
+                  type: 'image',
+                  options: {
+                    hotspot: true,
+                  },
+                  validation: (Rule) => Rule.required(),
+                }),
+
+                defineField({
+                  name: 'alt',
+                  title: '代替テキスト',
+                  type: 'string',
+                }),
+              ],
+            }),
+          ],
+        }),
+      ],
     }),
 
     defineField({

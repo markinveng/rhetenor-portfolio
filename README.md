@@ -36,19 +36,23 @@ cp .env.example .env.development
 cp .env.example .env.production
 ```
 
-`.env.example` を参考に、SanityのプロジェクトIDとdatasetを設定します。`SANITY_PROJECT_ID` はdevelopment/productionで共通、`SANITY_DATASET` のみ環境ごとに変えます。
+`.env.example` を参考に、SanityのプロジェクトIDとdatasetを設定します。`SANITY_PROJECT_ID` はdevelopment/productionで共通、`SANITY_DATASET` のみ環境ごとに変えます。`PUBLIC_` が付いた同名の変数は、クライアント(ブラウザ)側のコードから参照するためのものです(Astroはこのプレフィックスが付いた変数のみをクライアントバンドルに含めます)。サーバーサイドのコードからは `PUBLIC_` なしの変数を使ってください。
 
 ```
 # .env.development
 SANITY_PROJECT_ID=プロジェクトID
 SANITY_DATASET=development
+PUBLIC_SANITY_PROJECT_ID=プロジェクトID
+PUBLIC_SANITY_DATASET=development
 
 # .env.production
 SANITY_PROJECT_ID=プロジェクトID
 SANITY_DATASET=production
+PUBLIC_SANITY_PROJECT_ID=プロジェクトID
+PUBLIC_SANITY_DATASET=production
 ```
 
-`npm run dev` は `.env.development` を、`npm run build` は `.env.production` を自動的に読み込みます(Astro/Viteの標準の仕組みで、`--mode` を指定しない限りコマンドに応じて自動選択されます)。いずれも `.gitignore` 対象なので、値はチームメンバー間で別途共有してください。
+`npm run dev` は `.env.development` を、`npm run build` は `.env.production` を自動的に読み込みます(Astro/Viteの標準の仕組みで、`--mode` を指定しない限りコマンドに応じて自動選択されます)。**環境変数ファイルを追加・変更した場合は、起動中の `npm run dev` を一度再起動してください**(Viteは起動時にしか `.env` を読み込まないため、動かしたまま変更しても反映されません)。いずれのファイルも `.gitignore` 対象なので、値はチームメンバー間で別途共有してください。
 
 開発サーバーを起動します。
 

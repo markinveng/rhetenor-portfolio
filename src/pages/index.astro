@@ -1,16 +1,13 @@
 ---
 import Layout from '../layouts/Layout.astro';
 import WaterBackground from '../components/WaterBackground/WaterBackground.astro';
-import { getPortfolioList } from '../ts/Sanity/sanity';
+import WorkList from '../components/WorkList/WorkList.astro';
+import { PortfolioApi } from '../ts/Sanity/index';
 
-const contents = await getPortfolioList();
+const portfolioApi = new PortfolioApi();
 ---
 
 <Layout>
-	<WaterBackground />
-	<nav>
-		{contents.map((item) => (
-			<a href={`/discover?name=${item.slug.current}`}>{item.title}</a>
-		))}
-	</nav>
+	<!-- <WaterBackground /> -->
+	<WorkList portfolios={await portfolioApi.getList()} />
 </Layout>

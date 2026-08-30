@@ -1,17 +1,26 @@
 {
   "cSpell.words": [
+    "Dotenv",
     "Equirectangular",
     "FXAA",
+    "gadg",
     "glslify",
     "GLTF",
+    "gsap",
+    "Hanako",
     "hotspot",
     "mdcs",
     "metalness",
     "microcms",
     "palt",
+    "portabletext",
     "raycaster",
     "rhetenor",
-    "webgpu"
+    "Sato",
+    "uvtbdxa",
+    "vercel",
+    "webgpu",
+    "workerd"
   ],
   "terminal.integrated.enableFileLinks": "off"
 }

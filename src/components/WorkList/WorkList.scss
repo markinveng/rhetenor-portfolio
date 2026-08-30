@@ -1,0 +1,74 @@
+.work-list {
+  position: relative;
+
+  width: 100%;
+  height: 100svh;
+
+  overflow: hidden;
+
+  cursor: grab;
+
+  touch-action: none;
+  user-select: none;
+
+  &.is-dragging {
+    cursor: grabbing;
+  }
+
+  &__track {
+    position: absolute;
+
+    top: 0;
+    left: 0;
+
+    will-change: transform;
+  }
+
+  &__item {
+    position: absolute;
+
+    top: 0;
+    left: 0;
+
+    will-change: transform;
+  }
+
+  &__link {
+    display: block;
+
+    color: inherit;
+    text-decoration: none;
+  }
+
+  &__media {
+    width: 100%;
+
+    aspect-ratio: 4 / 5;
+
+    overflow: hidden;
+
+    will-change: transform;
+  }
+
+  &__image {
+    display: block;
+
+    width: 100%;
+    height: 100%;
+
+    object-fit: cover;
+
+    pointer-events: none;
+  }
+
+  &__information {
+    margin-top: 12px;
+  }
+
+  &__title {
+    margin: 0;
+
+    font-size: 14px;
+    font-weight: 400;
+  }
+}

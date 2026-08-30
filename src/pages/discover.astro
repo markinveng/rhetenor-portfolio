@@ -2,7 +2,7 @@
 export const prerender = false;
 
 import Layout from '../layouts/Layout.astro';
-import { getPortfolioBySlug, urlFor } from '../ts/Sanity/sanity';
+import { PortfolioApi, urlFor } from '../ts/Sanity';
 
 const slug = Astro.url.searchParams.get('name');
 
@@ -10,9 +10,11 @@ if (!slug) {
   return Astro.redirect('/');
 }
 
+const portfolioApi = new PortfolioApi();
+
 let portfolioData;
 try {
-  const portfolio = await getPortfolioBySlug(slug);
+  const portfolio = await portfolioApi.getBySlug(slug);
 
   if (!portfolio) {
     return Astro.redirect('/');
@@ -28,11 +30,10 @@ try {
 <Layout
   title={portfolioData.metaTitle}
   metaDescription={portfolioData.metaDescription}
-  ogpImage={urlFor(portfolioData.ogpImage).url()}
+  ogpImage={portfolioData.ogpImage ? urlFor(portfolioData.ogpImage).url() : undefined}
 >
   <main>
     <h1>{portfolioData.title}</h1>
     <p>{portfolioData.modalDescription}</p>
   </main>
-</Layout>
 </Layout>

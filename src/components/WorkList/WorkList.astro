@@ -1,0 +1,76 @@
+---
+import type {
+  PortfolioSummary,
+} from '../../types/portfolio';
+
+interface Props {
+  portfolios: PortfolioSummary[];
+}
+
+const { portfolios } = Astro.props;
+---
+
+<section
+  class="portfolio-canvas"
+  data-portfolio-canvas
+>
+  <div
+    class="portfolio-canvas__world"
+    data-portfolio-world
+  >
+    {
+      portfolios.map((portfolio, index) => (
+        <button
+          type="button"
+          class="portfolio-canvas__item"
+          data-portfolio-item
+          data-index={index}
+          data-slug={portfolio.slug.current}
+          aria-label={`${portfolio.title}を開く`}
+        >
+          {
+            portfolio.thumbnailMedia.type === 'img' && (
+              <div
+                class="portfolio-canvas__media"
+                data-image-ref={
+                  portfolio.thumbnailMedia.image.asset._ref
+                }
+              />
+            )
+          }
+
+          {
+            portfolio.thumbnailMedia.type === 'vimeo' && (
+              <div
+                class="portfolio-canvas__media"
+                data-vimeo-url={
+                  portfolio.thumbnailMedia.vimeoUrl
+                }
+              />
+            )
+          }
+
+          <span class="portfolio-canvas__label">
+            + {portfolio.title}
+          </span>
+        </button>
+      ))
+    }
+  </div>
+
+  <div class="portfolio-canvas__guide">
+    Drag to explore
+  </div>
+</section>
+
+<script>
+  import { PortfolioCanvas } from '../../ts/Portfolio/PortfolioCanvas';
+
+  const root = document.querySelector<HTMLElement>(
+    '[data-portfolio-canvas]'
+  );
+
+  if (root) {
+    new PortfolioCanvas(root);
+  }
+</script>

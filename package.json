@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@astrojs/cloudflare": "^14.2.5",
+    "@portabletext/types": "^4.0.2",
     "@sanity/client": "^8.4.0",
     "@sanity/image-url": "^2.1.1",
     "astro": "^7.2.9",
