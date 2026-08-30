@@ -1,0 +1,183 @@
+$rail-width: 96px;
+
+.work-detail {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+
+  pointer-events: none;
+
+  &.is-open {
+    pointer-events: auto;
+  }
+
+  &__close-zone {
+    position: fixed;
+
+    top: 0;
+    right: 0;
+    z-index: 19;
+
+    width: 50vw;
+    height: 100vh;
+
+    cursor: pointer;
+  }
+
+  &__close {
+    position: fixed;
+
+    top: 32px;
+    right: 32px;
+    z-index: 22;
+
+    width: 40px;
+    height: 40px;
+
+    border: 1px solid rgba(255, 255, 255, 0.4);
+    border-radius: 50%;
+
+    background: none;
+    color: #fff;
+
+    font-size: 20px;
+    line-height: 1;
+
+    cursor: pointer;
+
+    visibility: hidden;
+    opacity: 0;
+  }
+
+  /*
+   * 左半分のパネル。スワイプで閉じる際にここごとtranslateXする。
+   */
+  &__panel {
+    position: fixed;
+
+    top: 0;
+    left: 0;
+    z-index: 21;
+
+    width: 50vw;
+    height: 100vh;
+
+    touch-action: pan-y;
+  }
+
+  &__title {
+    position: absolute;
+
+    top: 32px;
+    left: $rail-width + 32px;
+    z-index: 2;
+
+    margin: 0;
+
+    color: #fff;
+    font-size: 32px;
+    font-weight: 500;
+
+    pointer-events: none;
+
+    visibility: hidden;
+    opacity: 0;
+  }
+
+  &__rail {
+    position: absolute;
+
+    top: 0;
+    left: 0;
+    z-index: 1;
+
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+
+    width: $rail-width;
+    height: 100%;
+
+    padding: 32px 0;
+    gap: 16px;
+
+    overflow-y: auto;
+
+    visibility: hidden;
+    opacity: 0;
+  }
+
+  &__rail-item {
+    flex-shrink: 0;
+
+    width: 56px;
+    height: 56px;
+
+    border: 2px solid transparent;
+
+    background-color: #1a1a1a;
+    background-size: cover;
+    background-position: center;
+
+    cursor: pointer;
+    appearance: none;
+    padding: 0;
+
+    transition:
+      border-color 0.3s ease,
+      box-shadow 0.3s ease;
+
+    &.is-active {
+      border-color: #fff;
+      box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.4);
+    }
+  }
+
+  &__scroll {
+    position: absolute;
+
+    top: 0;
+    left: $rail-width;
+    z-index: 1;
+
+    width: calc(100% - #{$rail-width});
+    height: 100%;
+
+    overflow-y: auto;
+    scroll-snap-type: y mandatory;
+
+    visibility: hidden;
+    opacity: 0;
+
+    /* スクロールバーを非表示にする(無限ループのDOM操作を隠すため) */
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+
+    &::-webkit-scrollbar {
+      display: none;
+    }
+  }
+
+  &__slide {
+    width: 100%;
+    height: 100%;
+
+    scroll-snap-align: start;
+    scroll-snap-stop: always;
+
+    background-color: #1a1a1a;
+    background-size: cover;
+    background-position: center;
+
+    cursor: pointer;
+  }
+
+  &__hero {
+    position: fixed;
+    z-index: 21;
+
+    background-color: #1a1a1a;
+    background-size: cover;
+    background-position: center;
+  }
+}

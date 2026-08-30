@@ -4,10 +4,10 @@ export const prerender = false;
 import Layout from '../layouts/Layout.astro';
 import { PortfolioApi, urlFor } from '../ts/Sanity';
 
-const slug = Astro.url.searchParams.get('name');
+const slug = Astro.url.searchParams.get('prov');
 
 if (!slug) {
-  return Astro.redirect('/');
+  return Astro.redirect('/error');
 }
 
 const portfolioApi = new PortfolioApi();
@@ -17,13 +17,13 @@ try {
   const portfolio = await portfolioApi.getBySlug(slug);
 
   if (!portfolio) {
-    return Astro.redirect('/');
+    return Astro.redirect('/error');
   }
   
   portfolioData = portfolio;
 } catch (error) {
   console.error('Error fetching portfolio:', error);
-  return Astro.redirect('/');
+  return Astro.redirect('/error');
 }
 ---
 

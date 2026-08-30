@@ -1,0 +1,47 @@
+---
+import Layout from '../layouts/Layout.astro';
+---
+
+<Layout title="Not Found | Rhetenor">
+  <main class="error-page">
+    <p class="error-page__code">404</p>
+    <h1 class="error-page__title">作品が見つかりませんでした</h1>
+    <a class="error-page__link" href="/">トップへ戻る</a>
+  </main>
+</Layout>
+
+<style>
+  .error-page {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+
+    width: 100%;
+    height: 100svh;
+
+    background-color: #0a0a0a;
+    color: #fff;
+    text-align: center;
+  }
+
+  .error-page__code {
+    margin: 0;
+    font-size: 14px;
+    letter-spacing: 0.2em;
+    color: rgba(255, 255, 255, 0.5);
+  }
+
+  .error-page__title {
+    margin: 0;
+    font-size: 20px;
+    font-weight: 500;
+  }
+
+  .error-page__link {
+    color: #fff;
+    text-decoration: underline;
+    text-underline-offset: 4px;
+  }
+</style>

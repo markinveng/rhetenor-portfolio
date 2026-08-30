@@ -5,7 +5,7 @@ import {
   WATER_WIDTH,
   WATER_BOUNDS_X,
   WATER_BOUNDS_Y,
-} from "./WaterCompute";
+} from "./WaterCompute/index";
 
 interface WaterParams {
   color: string;
@@ -34,13 +34,6 @@ export class Water {
   private geometry: any;
   private material: any;
   private compute: WaterCompute;
-
-  private raycaster: any;
-  private interactionPlane: any;
-  private intersectionPointWorld: any;
-  private intersectionPointLocal: any;
-  private lastMouseWorld: any;
-  private hasLastMouseWorld = false;
 
   private pingPong = 0;
   private frameCounter = 0;
@@ -84,12 +77,6 @@ export class Water {
 
     this.mesh = new THREE.Mesh(this.geometry, this.material);
     scene.add(this.mesh);
-
-    this.raycaster = new THREE.Raycaster();
-    this.interactionPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
-    this.intersectionPointWorld = new THREE.Vector3();
-    this.intersectionPointLocal = new THREE.Vector3();
-    this.lastMouseWorld = new THREE.Vector2();
   }
 
   private getGridIndexFromPositionTSL(): any {
@@ -112,53 +99,6 @@ export class Water {
     const yIndex = int(y.add(0.5));
 
     return yIndex.mul(WATER_WIDTH).add(xIndex);
-  }
-
-  public raycast(camera: any, mouseNdc: any, isMouseDown: boolean): void {
-    this.raycaster.setFromCamera(mouseNdc, camera);
-    const intersectsPlane = this.raycaster.ray.intersectPlane(
-      this.interactionPlane,
-      this.intersectionPointWorld
-    );
-
-    if (intersectsPlane) {
-      this.intersectionPointLocal.copy(this.intersectionPointWorld);
-      this.mesh.worldToLocal(this.intersectionPointLocal);
-
-      const isInsideX = Math.abs(this.intersectionPointLocal.x) <= WATER_BOUNDS_X * 0.5;
-      const isInsideY = Math.abs(this.intersectionPointLocal.y) <= WATER_BOUNDS_Y * 0.5;
-
-      if (isInsideX && isInsideY) {
-        const current = new THREE.Vector2(
-          this.intersectionPointLocal.x,
-          this.intersectionPointLocal.y
-        );
-
-        if (!this.hasLastMouseWorld) {
-          this.lastMouseWorld.copy(current);
-          this.hasLastMouseWorld = true;
-        }
-
-        const dx = current.x - this.lastMouseWorld.x;
-        const dy = current.y - this.lastMouseWorld.y;
-
-        this.compute.mousePos.value.set(current.x, current.y);
-
-        const strengthScale = isMouseDown ? 1.0 : 0.4;
-        this.compute.mouseSpeed.value.set(dx * strengthScale, dy * strengthScale);
-
-        this.lastMouseWorld.copy(current);
-        return;
-      }
-    }
-
-    this.hasLastMouseWorld = false;
-    this.compute.mouseSpeed.value.set(0, 0);
-  }
-
-  public resetPointer(): void {
-    this.hasLastMouseWorld = false;
-    this.compute.mouseSpeed.value.set(0, 0);
   }
 
   public update(renderPipelineCompute: (node: any, dispatchSize: readonly [number, number, number]) => void, isMouseDown: boolean): void {

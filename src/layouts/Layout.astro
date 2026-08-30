@@ -1,4 +1,6 @@
 ---
+import { ClientRouter } from 'astro:transitions';
+
 interface Props {
   title?: string;
   metaDescription?: string;
@@ -24,11 +26,16 @@ const {
 		{metaDescription && <meta property="og:description" content={metaDescription} />}
 		{ogpImage && <meta property="og:image" content={ogpImage} />}
 		<meta property="og:title" content={title} />
+		<ClientRouter />
 	</head>
 	<body>
 		<slot />
 	</body>
 </html>
+
+<script>
+	import "../ts/main";
+</script>
 
 <style>
 	html,

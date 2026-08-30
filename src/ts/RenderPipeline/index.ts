@@ -1,7 +1,7 @@
 import * as THREE from "three/webgpu";
 import { pass, renderOutput } from "three/tsl";
 import { fxaa } from "three/addons/tsl/display/FXAANode.js";
-import { getPixelRatio } from "../Device";
+import { getPixelRatio } from "../Device/Device";
 
 export class RenderPipeline {
   public renderer: any;

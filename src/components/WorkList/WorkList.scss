@@ -1,5 +1,6 @@
-.work-list {
+.portfolio-canvas {
   position: relative;
+  z-index: 1;
 
   width: 100%;
   height: 100svh;
@@ -11,33 +12,104 @@
   touch-action: none;
   user-select: none;
 
+  transition: opacity 0.6s ease;
+
   &.is-dragging {
     cursor: grabbing;
   }
 
-  &__track {
+  body.has-open-work-detail & {
+    pointer-events: none;
+    opacity: 0.3;
+  }
+
+  /*
+   * 縦一列(&__column)を display:flex で横並びにする。
+   */
+  &__world {
     position: absolute;
 
     top: 0;
     left: 0;
 
+    display: flex;
+    align-items: flex-start;
+
+    width: max-content;
+
+    padding: 160px;
+    column-gap: 100px;
+
     will-change: transform;
+
+    @media (max-width: 1439px) {
+      padding: 100px;
+      column-gap: 70px;
+    }
+
+    @media (max-width: 1023px) {
+      padding: 70px;
+      column-gap: 50px;
+    }
+
+    @media (max-width: 639px) {
+      padding: 40px;
+      column-gap: 40px;
+    }
+  }
+
+  /*
+   * サムネイル画像を縦並びにする列。
+   * 奇数列の marginTop はJS側で高さの半分を動的に設定する。
+   */
+  &__column {
+    display: flex;
+    flex-direction: column;
+
+    row-gap: 120px;
+
+    @media (max-width: 1439px) {
+      row-gap: 100px;
+    }
+
+    @media (max-width: 1023px) {
+      row-gap: 80px;
+    }
+
+    @media (max-width: 639px) {
+      row-gap: 60px;
+    }
   }
 
   &__item {
-    position: absolute;
+    position: relative;
 
-    top: 0;
-    left: 0;
-
-    will-change: transform;
-  }
-
-  &__link {
     display: block;
 
-    color: inherit;
-    text-decoration: none;
+    width: 260px;
+
+    padding: 0;
+    border: none;
+
+    background: none;
+
+    text-align: left;
+
+    cursor: inherit;
+
+    appearance: none;
+
+    @media (max-width: 1439px) {
+      width: 220px;
+    }
+
+    @media (max-width: 1023px) {
+      width: 190px;
+    }
+
+    @media (max-width: 639px) {
+      width: min(160px, 40vw);
+    }
   }
 
   &__media {
@@ -45,30 +117,42 @@
 
     aspect-ratio: 4 / 5;
 
+    background-color: #1a1a1a;
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+
     overflow: hidden;
 
+    pointer-events: none;
     will-change: transform;
   }
 
-  &__image {
+  &__label {
     display: block;
 
-    width: 100%;
-    height: 100%;
+    margin-top: 12px;
 
-    object-fit: cover;
+    font-size: 14px;
+    font-weight: 400;
+    color: inherit;
 
     pointer-events: none;
   }
 
-  &__information {
-    margin-top: 12px;
-  }
+  &__guide {
+    position: fixed;
 
-  &__title {
-    margin: 0;
+    left: 50%;
+    bottom: 32px;
 
-    font-size: 14px;
-    font-weight: 400;
+    transform: translateX(-50%);
+
+    font-size: 12px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.6);
+
+    pointer-events: none;
   }
 }

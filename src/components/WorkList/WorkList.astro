@@ -2,6 +2,8 @@
 import type {
   PortfolioSummary,
 } from '../../types/portfolio';
+import './WorkList.scss';
+import './WorkDetail.scss';
 
 interface Props {
   portfolios: PortfolioSummary[];
@@ -26,12 +28,14 @@ const { portfolios } = Astro.props;
           data-portfolio-item
           data-index={index}
           data-slug={portfolio.slug.current}
+          data-title={portfolio.title}
           aria-label={`${portfolio.title}を開く`}
         >
           {
             portfolio.thumbnailMedia?.type === 'img' && (
               <div
                 class="portfolio-canvas__media"
+                data-portfolio-media
                 data-image-ref={
                   portfolio.thumbnailMedia.image.asset._ref
                 }
@@ -43,6 +47,7 @@ const { portfolios } = Astro.props;
             portfolio.thumbnailMedia?.type === 'vimeo' && (
               <div
                 class="portfolio-canvas__media"
+                data-portfolio-media
                 data-vimeo-url={
                   portfolio.thumbnailMedia.vimeoUrl
                 }
@@ -63,14 +68,30 @@ const { portfolios } = Astro.props;
   </div>
 </section>
 
-<script>
-  import { PortfolioCanvas } from '../../ts/Portfolio/PortfolioCanvas';
+<section
+  class="work-detail"
+  data-work-detail
+  aria-hidden="true"
+>
+  <div
+    class="work-detail__close-zone"
+    data-work-detail-close-zone
+  ></div>
 
-  const root = document.querySelector<HTMLElement>(
-    '[data-portfolio-canvas]'
-  );
+  <button
+    type="button"
+    class="work-detail__close"
+    data-work-detail-close
+    aria-label="閉じる"
+  >
+    ×
+  </button>
 
-  if (root) {
-    new PortfolioCanvas(root);
-  }
-</script>
+  <div class="work-detail__panel" data-work-detail-panel>
+    <h2 class="work-detail__title" data-work-detail-title></h2>
+
+    <div class="work-detail__rail" data-work-detail-rail></div>
+
+    <div class="work-detail__scroll" data-work-detail-scroll></div>
+  </div>
+</section>

@@ -9,6 +9,30 @@ import type {
 
 export { urlFor };
 
+/**
+ * @astrojs/cloudflare (workerd) のローカル実行環境では
+ * 外部への fetch が断続的に "fetch failed" で失敗することがある
+ * (astro側の既知の問題。ソースコード起因ではない)。
+ * 影響を緩和するため、失敗時のみ短い間隔でリトライする。
+ */
+async function fetchWithRetry<T>(
+  query: string,
+  params: Record<string, unknown> = {},
+  retries = 2,
+): Promise<T> {
+  try {
+    return await sanityClient.fetch<T>(query, params);
+  } catch (error) {
+    if (retries <= 0) {
+      throw error;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    return fetchWithRetry<T>(query, params, retries - 1);
+  }
+}
+
 export class PortfolioApi {
   /**
    * ポートフォリオ一覧取得
@@ -16,7 +40,7 @@ export class PortfolioApi {
   public async getList(): Promise<
     PortfolioSummary[]
   > {
-    return sanityClient.fetch<
+    return fetchWithRetry<
       PortfolioSummary[]
     >(
       PortfolioQuery.getList()
@@ -30,7 +54,7 @@ export class PortfolioApi {
     slug: string
   ): Promise<Portfolio | null> {
 
-    return sanityClient.fetch<
+    return fetchWithRetry<
       Portfolio | null
     >(
       PortfolioQuery.getBySlug(),
