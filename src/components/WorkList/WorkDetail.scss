@@ -135,6 +135,12 @@ $rail-width: 96px;
     }
   }
 
+  /*
+   * 可視コンテンツは持たない。実際のメディアはPlaneとしてWebGL側に描画される。
+   * ここはホイール/タッチ入力を受け取るヒットゾーンとしてのみ機能する。
+   * 表示/非表示の制御は親要素(.work-detail.is-open)のpointer-eventsに任せるため、
+   * ここ自体はvisibility/opacityを切り替えない(常にインタラクション可能な状態にしておく)。
+   */
   &__scroll {
     position: absolute;
 
@@ -145,58 +151,31 @@ $rail-width: 96px;
     width: calc(100% - #{$rail-width});
     height: 100%;
 
-    overflow-y: auto;
-    scroll-snap-type: y mandatory;
+    cursor: pointer;
+    touch-action: none;
+  }
+
+  &__vimeo-frame {
+    position: absolute;
+    inset: 0;
+
+    width: 100%;
+    height: 100%;
+
+    border: 0;
+
+    background-color: #1a1a1a;
+
+    /*
+     * background=1のVimeo埋め込みは操作UIを持たないため、
+     * ホイール/タッチ入力をiframeに奪われないよう無効化する。
+     */
+    pointer-events: none;
 
     visibility: hidden;
     opacity: 0;
 
-    /* スクロールバーを非表示にする(無限ループのDOM操作を隠すため) */
-    scrollbar-width: none;
-    -ms-overflow-style: none;
-
-    &::-webkit-scrollbar {
-      display: none;
-    }
-  }
-
-  &__slide {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-
-    width: 100%;
-    height: 100%;
-
-    scroll-snap-align: start;
-    scroll-snap-stop: always;
-
-    background-color: #1a1a1a;
-
-    cursor: pointer;
-    overflow: hidden;
-  }
-
-  &__slide-media {
-    width: 100%;
-    height: 100%;
-
-    background-size: contain;
-    background-position: center;
-    background-repeat: no-repeat;
-  }
-
-  &__slide-video {
-    width: 100%;
-
-    iframe {
-      display: block;
-
-      width: 100%;
-      height: 100%;
-
-      border: 0;
-    }
+    transition: opacity 0.3s ease;
   }
 
   &__hero {

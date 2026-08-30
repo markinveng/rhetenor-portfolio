@@ -42,9 +42,19 @@ export interface VimeoMedia {
   vimeoUrl: string;
 }
 
+export interface VideoMedia {
+  _type: 'mediaItem';
+  _key?: string;
+
+  type: 'video';
+
+  videoUrl: string;
+}
+
 export type MediaItem =
   | ImageMedia
-  | VimeoMedia;
+  | VimeoMedia
+  | VideoMedia;
 
 /**
  * Related Link

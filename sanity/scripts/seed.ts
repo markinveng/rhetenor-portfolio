@@ -82,8 +82,8 @@ async function seed() {
         Math.random() < 0.3
           ? {
             _type: 'mediaItem',
-            type: 'vimeo',
-            vimeoUrl: 'https://vimeo.com/1094266104',
+            type: 'video',
+            videoUrl: 'https://pub-5f1b1ff8ec354c9e9343d8b70a84e334.r2.dev/mov_hts-samp005.mp4',
           }
           : {
             _type: 'mediaItem',
@@ -92,13 +92,19 @@ async function seed() {
             alt: `Sample Project ${number}`,
           },
 
-      // サムネイルクリック後のメディア一覧(先頭はVimeo動画)
+      // サムネイルクリック後のメディア一覧(先頭はVimeo動画、2番目は直接動画URL)
       previewMedia: [
         {
           _type: 'mediaItem',
           _key: `preview-${i}-vimeo`,
           type: 'vimeo',
           vimeoUrl: 'https://vimeo.com/1094266104',
+        },
+        {
+          _type: 'mediaItem',
+          _key: `preview-${i}-video`,
+          type: 'video',
+          videoUrl: 'https://pub-5f1b1ff8ec354c9e9343d8b70a84e334.r2.dev/mov_hts-samp005.mp4',
         },
         {
           _type: 'mediaItem',

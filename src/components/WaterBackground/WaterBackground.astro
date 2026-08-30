@@ -7,17 +7,25 @@ import styles from "./WaterBackground.module.scss";
 <script>
   import initWaterBackground from "../../ts/World/WaterBackground";
 
-  const container = document.querySelector(
-    "[data-water-background]"
-  ) as HTMLDivElement | null;
+  let cleanup: (() => void) | null = null;
 
-  const cleanup = initWaterBackground(container);
+  const start = (): void => {
+    cleanup?.();
+
+    const container = document.querySelector(
+      "[data-water-background]"
+    ) as HTMLDivElement | null;
+
+    cleanup = initWaterBackground(container);
+  };
+
+  // astro:transitions(ClientRouter)の遷移のたびに作り直す。
+  document.addEventListener("astro:page-load", start);
 
   // ページ遷移/リロード時の後始末（useEffect の return 相当）
-  window.addEventListener("beforeunload", cleanup, { once: true });
-
-  // Astro View Transitions を使っている場合の後始末
-  document.addEventListener("astro:before-swap", cleanup as EventListener, {
-    once: true,
+  document.addEventListener("astro:before-swap", () => cleanup?.(), {
+    once: false,
   });
+
+  window.addEventListener("beforeunload", () => cleanup?.(), { once: true });
 </script>

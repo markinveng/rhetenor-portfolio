@@ -17,52 +17,11 @@ const { portfolios } = Astro.props;
   class="portfolio-canvas"
   data-portfolio-canvas
 >
-  <div
-    class="portfolio-canvas__world"
-    data-portfolio-world
-  >
-    {
-      portfolios.map((portfolio, index) => (
-        <button
-          type="button"
-          class="portfolio-canvas__item"
-          data-portfolio-item
-          data-index={index}
-          data-slug={portfolio.slug.current}
-          data-title={portfolio.title}
-          aria-label={`${portfolio.title}を開く`}
-        >
-          {
-            portfolio.thumbnailMedia?.type === 'img' && (
-              <div
-                class="portfolio-canvas__media"
-                data-portfolio-media
-                data-image-ref={
-                  portfolio.thumbnailMedia.image.asset._ref
-                }
-              />
-            )
-          }
-
-          {
-            portfolio.thumbnailMedia?.type === 'vimeo' && (
-              <div
-                class="portfolio-canvas__media"
-                data-portfolio-media
-                data-vimeo-url={
-                  portfolio.thumbnailMedia.vimeoUrl
-                }
-              />
-            )
-          }
-
-          <span class="portfolio-canvas__label">
-            + {portfolio.title}
-          </span>
-        </button>
-      ))
-    }
-  </div>
+  <script
+    type="application/json"
+    data-portfolio-data
+    set:html={JSON.stringify(portfolios).replace(/</g, '\\u003c')}
+  />
 
   <div class="portfolio-canvas__guide">
     Drag to explore

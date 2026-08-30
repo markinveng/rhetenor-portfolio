@@ -1,11 +1,9 @@
-import * as THREE from "three/webgpu";
-import { CameraController } from "../../CameraController";
-import { RenderPipeline } from "../../RenderPipeline";
+import { getOrCreateWorld, disposeWorld } from "../index";
 import { Water } from "../Water";
-import { DebugGUI } from "../../DebugGUI";
 
 /**
  * WaterBackground を初期化し、後始末用のクリーンアップ関数を返す。
+ * Scene/Camera/Rendererは共有Worldから取得し、WorkListのPlaneギャラリーと同じCanvasに統合する。
  */
 export default function initWaterBackground(
   container: HTMLDivElement | null,
@@ -14,57 +12,29 @@ export default function initWaterBackground(
     return () => { };
   }
 
-  const scene = new THREE.Scene();
+  const world = getOrCreateWorld(container);
+  const water = new Water(world.scene);
 
-  const hemisphereLight = new THREE.HemisphereLight(0xbfe3ff, 0x1a2a33, 1.2);
-  scene.add(hemisphereLight);
-
-  const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-  directionalLight.position.set(6, 10, 8);
-  scene.add(directionalLight);
-
-  const cameraController = new CameraController(
-    window.innerWidth / window.innerHeight,
-  );
-
-  const renderPipeline = new RenderPipeline(
-    container,
-    scene,
-    cameraController.camera,
-  );
-
-  const water = new Water(scene);
-
-  let debugGUI: DebugGUI | null = null;
-
-  if (import.meta.env.DEV) {
-    debugGUI = new DebugGUI();
-
-    water.registerGUI(debugGUI.addFolder("Water"));
-    cameraController.registerGUI(debugGUI.addFolder("Camera"));
+  if (world.debugGUI) {
+    water.registerGUI(world.debugGUI.addFolder("Water"));
   }
 
-  renderPipeline.renderer.setAnimationLoop(() => {
+  const unregisterUpdate = world.registerUpdate(() => {
     water.update(
-      (node, dispatchSize) => renderPipeline.compute(node, dispatchSize),
+      (node, dispatchSize) =>
+        world.renderPipeline.compute(node, dispatchSize),
       false,
     );
-
-    renderPipeline.render();
   });
 
-  const handleResize = (): void => {
-    cameraController.resize(window.innerWidth / window.innerHeight);
-    renderPipeline.resize();
-  };
-
-  window.addEventListener("resize", handleResize);
-
   return () => {
-    window.removeEventListener("resize", handleResize);
-
+    unregisterUpdate();
     water.dispose();
-    renderPipeline.dispose();
-    debugGUI?.dispose();
+
+    /*
+     * このCanvasを使うのはWaterBackground/WorkListのみのため、
+     * ページ離脱時にまとめて解放する。
+     */
+    disposeWorld();
   };
 }

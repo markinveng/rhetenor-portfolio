@@ -1,6 +1,6 @@
 /*
- * WorkList / WorkDetail 共通のホバー用カーソル。
- * 円の範囲だけ色反転(hue-rotate)する。
+ * WorkList / WorkDetail 共通のホバー用カーソル(ラベル表示)。
+ * 色反転の視覚効果自体はPlane側のシェーダーが担当する。
  */
 .hover-invert-cursor {
   position: fixed;
@@ -46,17 +46,4 @@
   font-size: 10px;
   letter-spacing: 0.05em;
   text-shadow: 0 0 6px rgba(0, 0, 0, 0.6);
-}
-
-.hover-invert-cursor__overlay {
-  position: absolute;
-  inset: 0;
-
-  background-size: cover;
-  background-position: center;
-
-  filter: invert(1) hue-rotate(180deg);
-
-  pointer-events: none;
-  will-change: clip-path;
 }

@@ -24,6 +24,10 @@ export const mediaItemType = defineType({
             title: 'Vimeo動画',
             value: 'vimeo',
           },
+          {
+            title: '動画(直接URL)',
+            value: 'video',
+          },
         ],
         layout: 'radio',
       },
@@ -62,6 +66,18 @@ export const mediaItemType = defineType({
       hidden: ({ parent }) =>
         parent?.type !== 'vimeo',
     }),
+
+    defineField({
+      name: 'videoUrl',
+      title: '動画URL(mp4など、直接再生できるファイルのURL)',
+      type: 'url',
+
+      description:
+        'Cloudflare R2などにアップロードした動画ファイルの公開URL',
+
+      hidden: ({ parent }) =>
+        parent?.type !== 'video',
+    }),
   ],
 
   validation: (Rule) =>
@@ -84,6 +100,13 @@ export const mediaItemType = defineType({
         return 'Vimeo URLを入力してください'
       }
 
+      if (
+        value.type === 'video' &&
+        !value.videoUrl
+      ) {
+        return '動画URLを入力してください'
+      }
+
       return true
     }),
 
@@ -92,17 +115,26 @@ export const mediaItemType = defineType({
       type: 'type',
       image: 'image',
       vimeoUrl: 'vimeoUrl',
+      videoUrl: 'videoUrl',
     },
 
     prepare({
       type,
       image,
       vimeoUrl,
+      videoUrl,
     }) {
       if (type === 'img') {
         return {
           title: '画像',
           media: image,
+        }
+      }
+
+      if (type === 'video') {
+        return {
+          title: '動画(直接URL)',
+          subtitle: videoUrl,
         }
       }
 

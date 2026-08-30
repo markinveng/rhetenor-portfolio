@@ -1,106 +1,181 @@
 import gsap from "gsap";
+// gsap の型定義がWindows上で大文字小文字の衝突を起こすため抑制 (see: WorkList/index.tsと同様)
+// @ts-ignore
+import { Observer } from "gsap/Observer";
 import Lenis from "lenis";
 import { navigate } from "astro:transitions/client";
 
+import * as THREE from "three/webgpu";
+
+import { getOrCreateWorld, type WorldContext } from "../index";
 import { PortfolioApi, urlFor } from "../../Sanity";
-import { fetchVimeoInfo } from "../../utils/vimeo";
+import { fetchVimeoInfo, getVimeoId } from "../../utils/vimeo";
+import { createVideoTexture, type VideoTextureHandle } from "../../utils/media";
+import {
+  createHoverInvertMaterial,
+  type HoverInvertMaterialHandle,
+} from "../../materials/createHoverInvertMaterial";
 import { HoverInvertCursor } from "../../utils/HoverInvertCursor";
-import type {
-  MediaItem,
-  Portfolio,
-} from "../../../types/portfolio";
+import type { MediaItem, Portfolio } from "../../../types/portfolio";
+
+gsap.registerPlugin(Observer);
 
 const portfolioApi = new PortfolioApi();
 
 const RAIL_WIDTH = 96;
+const SLIDE_TRANSITION_DURATION = 0.7;
 
-/** ドラッグでスワイプ閉じと判定する左方向の距離(px) */
-const SWIPE_CLOSE_THRESHOLD = 50;
+interface ScreenRect {
+  top: number;
+  left: number;
+  width: number;
+  height: number;
+}
 
 interface OpenEventDetail {
   slug: string;
   title: string;
-  media: HTMLElement;
+  rect: ScreenRect;
+  imageUrl: string | null;
 }
 
-interface ResolvedMedia {
-  kind: "image" | "vimeo";
-  posterUrl: string | null;
+type SlideKind = "image" | "video" | "vimeo-embed";
+
+interface SlideSource {
+  kind: SlideKind;
+  /** image: Sanity画像URL, video: 直接再生できる動画URL, vimeo-embed: null */
+  url: string | null;
+  /** vimeo-embedのみ使用 */
   embedUrl?: string;
-  aspectRatio?: number;
+  /** レール・クロスフェード用のポスター画像(video種別には無い) */
+  posterUrl: string | null;
+  aspectRatio: number;
+}
+
+interface SlideEntry {
+  kind: SlideKind;
+  /** THREE.Mesh/THREE.Texture(three/webgpuには@types/threeのサブパス型定義が無いためany)。 */
+  mesh: any;
+  hover: HoverInvertMaterialHandle | null;
+  videoHandle: VideoTextureHandle | null;
+  texture: any;
+  aspectRatio: number;
+  baseWidth: number;
+  baseHeight: number;
 }
 
 /**
- * Sanityの画像、またはVimeo動画情報(サムネイル・埋め込みURL・比率)を解決する。
+ * mediaItemから、Plane描画に必要な種別・URL・アスペクト比を解決する。
+ * "vimeo"タイプでも実際のvimeo.com URLでない場合(過去データ)は
+ * 直接動画URLとして扱う。
  */
-async function resolveMedia(media: MediaItem): Promise<ResolvedMedia> {
+async function resolveSlideSource(media: MediaItem): Promise<SlideSource> {
   if (media.type === "img") {
+    const url = urlFor(media.image).width(1400).url();
+    return { kind: "image", url, posterUrl: url, aspectRatio: 16 / 9 };
+  }
+
+  if (media.type === "video") {
     return {
-      kind: "image",
-      posterUrl: urlFor(media.image).width(1200).url(),
+      kind: "video",
+      url: media.videoUrl,
+      posterUrl: null,
+      aspectRatio: 16 / 9,
+    };
+  }
+
+  if (!getVimeoId(media.vimeoUrl)) {
+    return {
+      kind: "video",
+      url: media.vimeoUrl,
+      posterUrl: null,
+      aspectRatio: 16 / 9,
     };
   }
 
   const info = await fetchVimeoInfo(media.vimeoUrl);
 
   if (!info) {
-    return { kind: "vimeo", posterUrl: null };
+    return { kind: "vimeo-embed", url: null, posterUrl: null, aspectRatio: 16 / 9 };
   }
 
   return {
-    kind: "vimeo",
-    posterUrl: info.posterUrl,
+    kind: "vimeo-embed",
+    url: null,
     embedUrl: info.embedUrl,
+    posterUrl: info.posterUrl,
     aspectRatio: info.aspectRatio,
   };
 }
 
-interface DragState {
-  active: boolean;
-  startX: number;
-  startY: number;
-  mode: "none" | "horizontal" | "vertical";
+/** `object-fit: contain` と同じ計算。box内に収まる最大サイズを返す。 */
+function containFit(
+  aspectRatio: number,
+  boxWidth: number,
+  boxHeight: number,
+): { width: number; height: number } {
+  const boxAspect = boxWidth / boxHeight;
+
+  if (aspectRatio > boxAspect) {
+    return { width: boxWidth, height: boxWidth / aspectRatio };
+  }
+
+  return { width: boxHeight * aspectRatio, height: boxHeight };
+}
+
+function mod(n: number, m: number): number {
+  return ((n % m) + m) % m;
 }
 
 export class WorkDetail {
   private readonly root: HTMLElement;
   private readonly panelEl: HTMLElement;
   private readonly railEl: HTMLElement;
+  /** 可視コンテンツは持たない。ドラッグ/ホイール入力のヒットゾーン。 */
   private readonly scrollEl: HTMLElement;
   private readonly titleEl: HTMLElement;
   private readonly closeEl: HTMLElement;
   private readonly closeZoneEl: HTMLElement;
+  private readonly vimeoFrameEl: HTMLIFrameElement;
 
   private heroEl: HTMLElement | null = null;
-  private slideEls: HTMLElement[] = [];
   private railItemEls: HTMLElement[] = [];
 
-  private slideObserver: IntersectionObserver | null = null;
-  private scrollDebounceId: number | null = null;
+  private world: WorldContext | null = null;
+  private readonly slideGroup = new THREE.Group();
+  private readonly sharedGeometry = new THREE.PlaneGeometry(1, 1);
+
+  private slideEntries: SlideEntry[] = [];
+  private slideSources: SlideSource[] = [];
+
+  private observer: Observer | null = null;
 
   private isOpen = false;
 
   private currentSlug: string | null = null;
-  private originMediaEl: HTMLElement | null = null;
-  private originItemEl: HTMLElement | null = null;
+  private originRect: ScreenRect | null = null;
+  private originImageUrl: string | null = null;
 
   private mediaCount = 0;
   private hasLoop = false;
+
+  /** 論理的な現在位置。実データのindex範囲を超えて連続的に増減する(無限ループ用)。 */
+  private activeIndexFloat = 0;
   private activeRealIndex = 0;
 
-  private dragState: DragState = {
-    active: false,
-    startX: 0,
-    startY: 0,
-    mode: "none",
-  };
-
-  /** ドラッグ後の誤クリック(意図しないスライド遷移)を防ぐフラグ */
-  private suppressSlideClick = false;
+  private panelWorldWidth = 0;
+  private panelWorldHeight = 0;
+  private panelWorldCenterX = 0;
+  private panelWorldCenterY = 0;
+  private pixelsToWorld = 0;
 
   private cursor: HoverInvertCursor | null = null;
+  private hoveredEntry: SlideEntry | null = null;
 
-  private mediaInfos: ResolvedMedia[] = [];
+  private readonly raycaster = new THREE.Raycaster();
+  private readonly pointerNdc = new THREE.Vector2();
+
+  private resizeHandler: (() => void) | null = null;
 
   constructor(root: HTMLElement) {
     this.root = root;
@@ -110,9 +185,18 @@ export class WorkDetail {
     this.scrollEl = this.requireEl("[data-work-detail-scroll]");
     this.titleEl = this.requireEl("[data-work-detail-title]");
     this.closeEl = this.requireEl("[data-work-detail-close]");
-    this.closeZoneEl = this.requireEl(
-      "[data-work-detail-close-zone]",
-    );
+    this.closeZoneEl = this.requireEl("[data-work-detail-close-zone]");
+
+    /*
+     * 本物のVimeo URLはクロスオリジンiframeの中身をテクスチャに焼き込めないため
+     * (ブラウザのセキュリティ制約)、この1種別だけはPlaneではなくDOM iframeのまま
+     * パネル領域いっぱいに重ねる。表示中のスライドがvimeo-embedの間だけ表示する。
+     */
+    this.vimeoFrameEl = document.createElement("iframe");
+    this.vimeoFrameEl.className = "work-detail__vimeo-frame";
+    this.vimeoFrameEl.allow = "autoplay; fullscreen";
+    this.vimeoFrameEl.setAttribute("loading", "lazy");
+    this.scrollEl.appendChild(this.vimeoFrameEl);
   }
 
   private requireEl(selector: string): HTMLElement {
@@ -132,6 +216,15 @@ export class WorkDetail {
      */
     this.resetState();
 
+    const container = document.querySelector<HTMLDivElement>(
+      "[data-water-background]",
+    );
+    this.world = container ? getOrCreateWorld(container) : null;
+
+    if (this.world) {
+      this.world.scene.add(this.slideGroup);
+    }
+
     this.cursor = new HoverInvertCursor(document.body);
 
     document.addEventListener(
@@ -141,11 +234,6 @@ export class WorkDetail {
 
     this.closeEl.addEventListener("click", this.closeToOrigin);
     this.closeZoneEl.addEventListener("click", this.closeToOrigin);
-
-    this.panelEl.addEventListener(
-      "pointerdown",
-      this.handlePointerDown,
-    );
   }
 
   private handleOpen = async (
@@ -157,27 +245,27 @@ export class WorkDetail {
 
     this.isOpen = true;
 
-    const { slug, title, media } = event.detail;
+    const { slug, title, rect, imageUrl } = event.detail;
 
     this.currentSlug = slug;
-    this.originMediaEl = media;
-    this.originItemEl = media.closest<HTMLElement>(
-      "[data-portfolio-item]",
-    );
+    this.originRect = rect;
+    this.originImageUrl = imageUrl;
 
     /*
-     * 背景のWorkList側に選択した作品がそのまま(薄く)残って
-     * 二重に見えてしまうため、選択元だけは完全に隠す。
+     * 背景のWorkList側(Plane)に選択した作品がそのまま残って
+     * 二重に見えてしまうため、選択元のPlaneだけは完全に隠す。
      */
-    if (this.originItemEl) {
-      this.originItemEl.style.visibility = "hidden";
-    }
+    document.dispatchEvent(
+      new CustomEvent("portfolio:setVisible", {
+        detail: { slug, visible: false },
+      }),
+    );
 
     this.root.classList.add("is-open");
     this.root.setAttribute("aria-hidden", "false");
     document.body.classList.add("has-open-work-detail");
 
-    const animationDone = this.animateHeroIn(media);
+    const animationDone = this.animateHeroIn(rect, imageUrl);
     const portfolio = await this.fetchPortfolio(slug);
 
     if (!portfolio) {
@@ -207,15 +295,20 @@ export class WorkDetail {
   }
 
   /**
-   * クリックされたサムネイルの位置から、画面左半分いっぱいまで
+   * クリックされたPlaneの画面上の位置(rect)から、画面左半分いっぱいまで
    * 拡大させるFLIP風アニメーション。ここはGSAP。
    */
-  private animateHeroIn(sourceMedia: HTMLElement): Promise<void> {
-    const rect = sourceMedia.getBoundingClientRect();
-
+  private animateHeroIn(
+    rect: ScreenRect,
+    imageUrl: string | null,
+  ): Promise<void> {
     const hero = document.createElement("div");
     hero.className = "work-detail__hero";
-    hero.style.backgroundImage = sourceMedia.style.backgroundImage;
+
+    if (imageUrl) {
+      hero.style.backgroundImage = `url(${imageUrl})`;
+    }
+
     hero.style.top = `${rect.top}px`;
     hero.style.left = `${rect.left}px`;
     hero.style.width = `${rect.width}px`;
@@ -258,8 +351,7 @@ export class WorkDetail {
   }
 
   /**
-   * 取得したPortfolioデータからサムネイル用レール、
-   * スクロールで切り替わるスライドを構築する。
+   * 取得したPortfolioデータから、スライド用のPlane群とレールを構築する。
    */
   private async showDetail(
     portfolio: Portfolio,
@@ -270,35 +362,40 @@ export class WorkDetail {
       ...(portfolio.previewMedia ?? []),
     ];
 
-    this.mediaInfos = await Promise.all(
-      mediaList.map((media) => resolveMedia(media)),
+    this.slideSources = await Promise.all(
+      mediaList.map((media) => resolveSlideSource(media)),
     );
 
     this.mediaCount = mediaList.length;
     this.hasLoop = this.mediaCount > 1;
+    this.activeIndexFloat = 0;
     this.activeRealIndex = 0;
 
     this.titleEl.textContent = title;
 
-    this.buildSlides();
+    this.updatePanelWorldRect();
+    this.buildSlideEntries();
     this.buildRail(title);
-    this.initSlideObserver();
+    this.updateSlidePositions();
+    this.updateVimeoFrame();
 
     /*
-     * hero(FLIP用の仮要素)から、実スクロール要素へ
-     * 見た目そのままバトンタッチする。
+     * hero(FLIP用の仮要素)から、Plane側へ見た目そのままバトンタッチする。
      */
-    gsap.set(this.scrollEl, { autoAlpha: 0 });
-    this.scrollEl.style.visibility = "visible";
+    this.slideEntries.forEach((entry) => {
+      entry.hover?.setOpacity(0, false);
+      entry.hover?.setOpacity(1);
 
-    gsap.to(this.scrollEl, {
-      autoAlpha: 1,
-      duration: 0.3,
-      onComplete: () => {
-        this.heroEl?.remove();
-        this.heroEl = null;
-      },
+      if (!entry.hover) {
+        const material = entry.mesh.material as any;
+        gsap.fromTo(material, { opacity: 0 }, { opacity: 1, duration: 0.4 });
+      }
     });
+
+    window.setTimeout(() => {
+      this.heroEl?.remove();
+      this.heroEl = null;
+    }, 300);
 
     this.titleEl.style.visibility = "visible";
     this.closeEl.style.visibility = "visible";
@@ -313,173 +410,258 @@ export class WorkDetail {
         stagger: 0.05,
       },
     );
+
+    this.initScrollObserver();
+    this.initPointerEvents();
+    this.initResizeHandler();
   }
 
   /**
-   * 無限スクロールのため前後にクローンを1枚ずつ足し、
-   * 境界に到達したら実位置へ瞬間ジャンプさせる(GSAPではない)。
+   * 画面左半分のパネル領域(work-detail__scroll のCSS上の矩形)を
+   * world座標に変換する。WorkListのlayout()と同じ px→world 変換を使う。
    */
-  private buildSlides(): void {
-    this.scrollEl.removeEventListener(
-      "scroll",
-      this.handleInfiniteScroll,
+  private updatePanelWorldRect(): void {
+    if (!this.world) {
+      return;
+    }
+
+    this.pixelsToWorld = this.world.getPixelsToWorld();
+
+    const rect = this.scrollEl.getBoundingClientRect();
+
+    const originX = (-window.innerWidth / 2) * this.pixelsToWorld;
+    const originY = (window.innerHeight / 2) * this.pixelsToWorld;
+
+    const centerXpx = rect.left + rect.width / 2;
+    const centerYpx = rect.top + rect.height / 2;
+
+    this.panelWorldCenterX = originX + centerXpx * this.pixelsToWorld;
+    this.panelWorldCenterY = originY - centerYpx * this.pixelsToWorld;
+    this.panelWorldWidth = rect.width * this.pixelsToWorld;
+    this.panelWorldHeight = rect.height * this.pixelsToWorld;
+
+    this.slideGroup.position.set(
+      this.panelWorldCenterX,
+      this.panelWorldCenterY,
+      0,
     );
-
-    this.scrollEl.innerHTML = "";
-
-    const extendedCount = this.hasLoop
-      ? this.mediaCount + 2
-      : this.mediaCount;
-
-    this.slideEls = Array.from(
-      { length: extendedCount },
-      (_, extIndex) => {
-        const realIndex = this.toRealIndex(extIndex);
-        const info = this.mediaInfos[realIndex];
-
-        const slide = document.createElement("div");
-        slide.className = "work-detail__slide";
-        slide.addEventListener("click", this.navigateToWork);
-
-        const mediaEl = this.createSlideMediaElement(info);
-        this.attachSlideHover(mediaEl);
-        slide.appendChild(mediaEl);
-
-        this.scrollEl.appendChild(slide);
-
-        return slide;
-      },
-    );
-
-    const startExtIndex = this.hasLoop ? 1 : 0;
-
-    requestAnimationFrame(() => {
-      this.scrollEl.scrollTop =
-        startExtIndex * this.scrollEl.clientHeight;
-    });
-
-    if (this.hasLoop) {
-      this.scrollEl.addEventListener(
-        "scroll",
-        this.handleInfiniteScroll,
-        { passive: true },
-      );
-    }
   }
 
   /**
-   * 画像は横幅に合わせてcontain、動画はVimeoの比率でiframeを敷き詰める。
-   * どちらもwork-detail__slide内で中央寄せされる。
+   * 各メディアに対応するPlaneを作る。
+   * image/video(直接URL) は実テクスチャを焼き込んだPlane、
+   * 本物のVimeoは中身の無いプレースホルダーPlane(背景色のみ、
+   * アクティブ時にDOM iframeを重ねて表示)にする。
    */
-  private createSlideMediaElement(info: ResolvedMedia): HTMLElement {
-    if (info.kind === "vimeo" && info.embedUrl) {
-      const wrapper = document.createElement("div");
-      wrapper.className = "work-detail__slide-video";
-      wrapper.style.aspectRatio = `${info.aspectRatio ?? 16 / 9}`;
+  private buildSlideEntries(): void {
+    this.disposeSlideEntries();
 
-      const iframe = document.createElement("iframe");
-      iframe.src = info.embedUrl;
-      iframe.allow = "autoplay; fullscreen";
-      iframe.setAttribute("loading", "lazy");
+    this.slideEntries = this.slideSources.map((source) => {
+      let texture: any = null;
+      let videoHandle: VideoTextureHandle | null = null;
+      let hover: HoverInvertMaterialHandle | null = null;
+      let material: any;
 
-      wrapper.appendChild(iframe);
+      if (source.kind === "image" && source.url) {
+        const loadedTexture = new THREE.TextureLoader().load(
+          source.url,
+          (loaded: any) => {
+            const image = loaded.image as HTMLImageElement;
 
-      return wrapper;
-    }
+            if (image?.naturalWidth > 0 && image?.naturalHeight > 0) {
+              source.aspectRatio = image.naturalWidth / image.naturalHeight;
+            }
 
-    const media = document.createElement("div");
-    media.className = "work-detail__slide-media";
+            this.updateSlidePositions();
+          },
+        );
+        loadedTexture.colorSpace = THREE.SRGBColorSpace;
+        texture = loadedTexture;
 
-    if (info.posterUrl) {
-      media.style.backgroundImage = `url(${info.posterUrl})`;
-    }
+        hover = createHoverInvertMaterial(loadedTexture);
+        material = hover.material;
+      } else if (source.kind === "video" && source.url) {
+        videoHandle = createVideoTexture(source.url);
+        texture = videoHandle.texture;
 
-    return media;
-  }
+        hover = createHoverInvertMaterial(videoHandle.texture);
+        material = hover.material;
 
-  private attachSlideHover(mediaEl: HTMLElement): void {
-    const handleEnter = (event: PointerEvent): void => {
-      const label = this.currentSlug ? "Discover →" : "Back →";
-      this.cursor?.enter(mediaEl, label, event.clientX, event.clientY);
-    };
-
-    const handleMove = (event: PointerEvent): void => {
-      this.cursor?.move(event.clientX, event.clientY);
-    };
-
-    const handleLeave = (): void => {
-      this.cursor?.leave();
-    };
-
-    mediaEl.addEventListener("pointerenter", handleEnter);
-    mediaEl.addEventListener("pointermove", handleMove);
-    mediaEl.addEventListener("pointerleave", handleLeave);
-  }
-
-  /**
-   * 前後にクローンを足した配列上のindexから、実データ上のindexへ変換する。
-   */
-  private toRealIndex(extIndex: number): number {
-    if (!this.hasLoop) {
-      return extIndex;
-    }
-
-    return (extIndex - 1 + this.mediaCount) % this.mediaCount;
-  }
-
-  /**
-   * クローン(先頭/末尾)まで到達したら、対応する実位置へ
-   * スクロールを瞬間的に戻すことで無限スクロールに見せる。
-   */
-  private handleInfiniteScroll = (): void => {
-    if (this.scrollDebounceId !== null) {
-      window.clearTimeout(this.scrollDebounceId);
-    }
-
-    this.scrollDebounceId = window.setTimeout(() => {
-      const slideHeight = this.scrollEl.clientHeight;
-      const extIndex = Math.round(
-        this.scrollEl.scrollTop / slideHeight,
-      );
-
-      if (extIndex === 0) {
-        this.scrollEl.scrollTop = this.mediaCount * slideHeight;
-      } else if (extIndex === this.mediaCount + 1) {
-        this.scrollEl.scrollTop = 1 * slideHeight;
+        videoHandle.ready.then(({ width, height }) => {
+          if (width > 0 && height > 0) {
+            source.aspectRatio = width / height;
+            this.updateSlidePositions();
+          }
+        });
+      } else {
+        material = new THREE.MeshBasicMaterial({
+          color: 0x1a1a1a,
+          transparent: true,
+          opacity: 0,
+        });
       }
 
-      this.scrollDebounceId = null;
-    }, 120);
-  };
+      const mesh = new THREE.Mesh(this.sharedGeometry, material);
+      this.slideGroup.add(mesh);
+
+      const entry: SlideEntry = {
+        kind: source.kind,
+        mesh,
+        hover,
+        videoHandle,
+        texture,
+        aspectRatio: source.aspectRatio,
+        baseWidth: 0,
+        baseHeight: 0,
+      };
+
+      return entry;
+    });
+  }
+
+  /**
+   * 現在のスクロール位置(activeIndexFloat)から、各Planeの
+   * ローカル位置を計算する。実メディア数ぶんのPlaneだけで
+   * 無限ループに見せるため、各Planeを「現在位置に一番近い巻き戻し位置」に置く。
+   */
+  private updateSlidePositions(): void {
+    if (!this.world || this.mediaCount === 0) {
+      return;
+    }
+
+    this.slideEntries.forEach((entry, index) => {
+      const fit = containFit(
+        entry.aspectRatio,
+        this.panelWorldWidth,
+        this.panelWorldHeight,
+      );
+
+      entry.baseWidth = fit.width;
+      entry.baseHeight = fit.height;
+      entry.mesh.scale.set(fit.width, fit.height, 1);
+
+      entry.hover?.setPlaneSize(fit.width, fit.height, this.pixelsToWorld);
+
+      let localY = 0;
+
+      if (this.hasLoop) {
+        const totalSteps = this.mediaCount;
+        const nearestK = Math.round(
+          (this.activeIndexFloat - index) / totalSteps,
+        );
+        const virtualIndex = index + nearestK * totalSteps;
+
+        localY =
+          -(virtualIndex - this.activeIndexFloat) * this.panelWorldHeight;
+      }
+
+      entry.mesh.position.set(0, localY, 0);
+    });
+
+    this.updateActiveRealIndex();
+  }
+
+  private updateActiveRealIndex(): void {
+    const nearestIndex = mod(
+      Math.round(this.activeIndexFloat),
+      this.mediaCount || 1,
+    );
+
+    if (nearestIndex === this.activeRealIndex) {
+      return;
+    }
+
+    this.activeRealIndex = nearestIndex;
+
+    this.railItemEls.forEach((railItem, railIndex) => {
+      railItem.classList.toggle("is-active", railIndex === nearestIndex);
+    });
+
+    this.updateVimeoFrame();
+  }
+
+  /**
+   * アクティブなスライドが本物のVimeoのときだけ、
+   * パネル領域いっぱいにiframeを表示する。
+   */
+  private updateVimeoFrame(): void {
+    const source = this.slideSources[this.activeRealIndex];
+
+    if (!source || source.kind !== "vimeo-embed" || !source.embedUrl) {
+      this.vimeoFrameEl.style.visibility = "hidden";
+      this.vimeoFrameEl.style.opacity = "0";
+      this.vimeoFrameEl.removeAttribute("src");
+      return;
+    }
+
+    if (this.vimeoFrameEl.src !== source.embedUrl) {
+      this.vimeoFrameEl.src = source.embedUrl;
+    }
+
+    this.vimeoFrameEl.style.visibility = "visible";
+    this.vimeoFrameEl.style.opacity = "1";
+  }
+
+  /**
+   * ホイール/タッチ/ドラッグを1ジェスチャー=1スライドの
+   * カルーセル操作として扱う(元DOM実装の scroll-snap-stop: always と同じ挙動)。
+   */
+  private initScrollObserver(): void {
+    this.observer?.kill();
+
+    if (!this.hasLoop) {
+      return;
+    }
+
+    /*
+     * "pointer"は含めない。preventDefault:trueと組み合わせると
+     * マウスクリックでのスライド遷移(navigateToWork)を阻害する恐れがあるため、
+     * 元のDOM実装と同じくホイール/タッチのみをスクロール操作として扱う。
+     */
+    this.observer = Observer.create({
+      target: this.scrollEl,
+      type: "wheel,touch",
+      preventDefault: true,
+      onUp: () => this.goToSlide(this.activeIndexFloat - 1),
+      onDown: () => this.goToSlide(this.activeIndexFloat + 1),
+    });
+  }
+
+  private goToSlide(targetIndex: number): void {
+    gsap.to(this, {
+      activeIndexFloat: targetIndex,
+      duration: SLIDE_TRANSITION_DURATION,
+      ease: "power3.inOut",
+      overwrite: true,
+      onUpdate: () => this.updateSlidePositions(),
+    });
+  }
 
   private buildRail(title: string): void {
     this.railEl.innerHTML = "";
+    this.railItemEls = [];
 
-    this.railItemEls = this.mediaInfos.map((info, index) => {
+    this.slideSources.forEach((source, index) => {
       const railItem = document.createElement("button");
       railItem.type = "button";
       railItem.className = "work-detail__rail-item";
-      railItem.setAttribute(
-        "aria-label",
-        `${title} ${index + 1}`,
-      );
+      railItem.setAttribute("aria-label", `${title} ${index + 1}`);
 
-      if (info.posterUrl) {
-        railItem.style.backgroundImage = `url(${info.posterUrl})`;
+      if (source.posterUrl) {
+        railItem.style.backgroundImage = `url(${source.posterUrl})`;
       }
 
       railItem.addEventListener("click", () => {
-        const targetExtIndex = this.hasLoop ? index + 1 : index;
+        const totalSteps = this.mediaCount;
+        const nearestK = Math.round(
+          (this.activeIndexFloat - index) / totalSteps,
+        );
 
-        this.scrollEl.scrollTo({
-          top: targetExtIndex * this.scrollEl.clientHeight,
-          behavior: "smooth",
-        });
+        this.goToSlide(index + nearestK * totalSteps);
       });
 
       this.railEl.appendChild(railItem);
-
-      return railItem;
+      this.railItemEls.push(railItem);
     });
 
     if (this.railItemEls[0]) {
@@ -487,44 +669,107 @@ export class WorkDetail {
     }
   }
 
-  /**
-   * 画面左半分だけのスクロールで、
-   * サムネイル→メディアリストの順に表示を切り替える。
-   * アクティブなレール項目の切り替えは自前処理(GSAPではない)。
-   */
-  private initSlideObserver(): void {
-    this.slideObserver?.disconnect();
+  /*-------------------------------
+    ホバー / クリック(raycast)
+  -------------------------------*/
 
-    this.slideObserver = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((entry) => {
-          if (!entry.isIntersecting) {
-            return;
-          }
+  private initPointerEvents(): void {
+    window.addEventListener("pointermove", this.handlePointerMove);
+    window.addEventListener("click", this.handleClick);
+  }
 
-          const extIndex = this.slideEls.indexOf(
-            entry.target as HTMLElement,
-          );
+  private destroyPointerEvents(): void {
+    window.removeEventListener("pointermove", this.handlePointerMove);
+    window.removeEventListener("click", this.handleClick);
+  }
 
-          const realIndex = this.toRealIndex(extIndex);
+  private raycastAt(clientX: number, clientY: number): SlideEntry | null {
+    if (!this.world) {
+      return null;
+    }
 
-          this.activeRealIndex = realIndex;
+    this.pointerNdc.x = (clientX / window.innerWidth) * 2 - 1;
+    this.pointerNdc.y = -(clientY / window.innerHeight) * 2 + 1;
 
-          this.railItemEls.forEach((railItem, railIndex) => {
-            railItem.classList.toggle(
-              "is-active",
-              railIndex === realIndex,
-            );
-          });
-        });
-      },
-      {
-        root: this.scrollEl,
-        threshold: 0.6,
-      },
+    this.raycaster.setFromCamera(
+      this.pointerNdc,
+      this.world.cameraController.camera,
     );
 
-    this.slideEls.forEach((slide) => this.slideObserver?.observe(slide));
+    const meshes = this.slideEntries.map((entry) => entry.mesh);
+
+    const intersections = this.raycaster.intersectObjects(meshes, false);
+
+    if (intersections.length === 0) {
+      return null;
+    }
+
+    const hit = intersections[0];
+    const entry = this.slideEntries.find((e) => e.mesh === hit.object);
+
+    if (entry && hit.uv) {
+      entry.hover?.setPointerUv(hit.uv.x, hit.uv.y);
+    }
+
+    return entry ?? null;
+  }
+
+  private handlePointerMove = (event: PointerEvent): void => {
+    if (!this.isOpen) {
+      return;
+    }
+
+    const entry = this.raycastAt(event.clientX, event.clientY);
+
+    if (entry !== this.hoveredEntry) {
+      this.hoveredEntry?.hover?.setActive(false);
+      this.hoveredEntry = entry;
+
+      if (entry) {
+        entry.hover?.setActive(true);
+        this.cursor?.enter("Discover →", event.clientX, event.clientY);
+      } else {
+        this.cursor?.leave();
+      }
+
+      return;
+    }
+
+    if (entry) {
+      this.cursor?.move(event.clientX, event.clientY);
+    }
+  };
+
+  private handleClick = (event: MouseEvent): void => {
+    if (!this.isOpen) {
+      return;
+    }
+
+    const entry = this.raycastAt(event.clientX, event.clientY);
+
+    if (entry) {
+      this.navigateToWork();
+    }
+  };
+
+  /*-------------------------------
+    リサイズ
+  -------------------------------*/
+
+  private initResizeHandler(): void {
+    this.resizeHandler = (): void => {
+      this.updatePanelWorldRect();
+      this.updateSlidePositions();
+    };
+
+    window.addEventListener("resize", this.resizeHandler);
+  }
+
+  private destroyResizeHandler(): void {
+    if (this.resizeHandler) {
+      window.removeEventListener("resize", this.resizeHandler);
+      this.resizeHandler = null;
+    }
   }
 
   /**
@@ -532,10 +777,6 @@ export class WorkDetail {
    * Lenisで一度スムーズスクロールしてから遷移する。
    */
   private navigateToWork = (): void => {
-    if (this.suppressSlideClick) {
-      return;
-    }
-
     const slug = this.currentSlug;
 
     const targetUrl = slug
@@ -569,10 +810,7 @@ export class WorkDetail {
 
     this.isOpen = false;
 
-    const originRect =
-      this.originMediaEl?.isConnected
-        ? this.originMediaEl.getBoundingClientRect()
-        : null;
+    const originRect = this.originRect;
 
     gsap.set([this.panelEl, this.closeEl], { autoAlpha: 0 });
     document.body.classList.remove("has-open-work-detail");
@@ -582,16 +820,16 @@ export class WorkDetail {
       return;
     }
 
-    const activeUrl = this.mediaInfos[this.activeRealIndex]?.posterUrl ?? null;
-    const originUrl = this.originMediaEl?.style.backgroundImage || null;
+    const activeSource = this.slideSources[this.activeRealIndex];
+    const activeUrl = activeSource?.posterUrl ?? null;
+    const originUrl = this.originImageUrl;
 
     /*
      * サムネイル以外(previewMediaの2枚目以降)を見ている状態で戻る場合、
      * 表示中の画像とサムネイル画像が異なるため、位置アニメーションの終盤で
      * 画像自体もクロスフェードさせて突然の切り替わりを防ぐ。
      */
-    const needsCrossfade =
-      this.activeRealIndex !== 0 && !!originUrl && originUrl !== "none";
+    const needsCrossfade = this.activeRealIndex !== 0 && !!originUrl;
 
     const hero = document.createElement("div");
     hero.className = "work-detail__hero";
@@ -610,7 +848,7 @@ export class WorkDetail {
     if (needsCrossfade) {
       targetLayer = document.createElement("div");
       targetLayer.className = "work-detail__hero-layer";
-      targetLayer.style.backgroundImage = originUrl as string;
+      targetLayer.style.backgroundImage = `url(${originUrl})`;
       targetLayer.style.opacity = "0";
 
       hero.appendChild(targetLayer);
@@ -622,6 +860,16 @@ export class WorkDetail {
     hero.style.height = `${window.innerHeight}px`;
 
     document.body.appendChild(hero);
+
+    this.slideEntries.forEach((entry) => {
+      if (entry.hover) {
+        entry.hover.setOpacity(0);
+      } else {
+        gsap.to(entry.mesh.material, { opacity: 0, duration: 0.4, overwrite: true });
+      }
+    });
+
+    this.vimeoFrameEl.style.opacity = "0";
 
     const timeline = gsap.timeline({
       onComplete: () => {
@@ -657,33 +905,6 @@ export class WorkDetail {
   };
 
   /**
-   * 左スワイプで閉じる場合は、パネルごとそのまま画面外(左)へ
-   * スライドさせる。元のサムネイルは位置移動ではなく
-   * フェードで自然に浮かび上がる(has-open-work-detail解除によるCSS transition)。
-   */
-  private closeBySwipe(): void {
-    if (!this.isOpen) {
-      return;
-    }
-
-    this.isOpen = false;
-
-    document.body.classList.remove("has-open-work-detail");
-
-    gsap.to(this.panelEl, {
-      x: -window.innerWidth,
-      duration: 0.4,
-      ease: "power2.in",
-      onComplete: () => this.resetState(),
-    });
-
-    gsap.to(this.closeEl, {
-      autoAlpha: 0,
-      duration: 0.25,
-    });
-  }
-
-  /**
    * データ取得に失敗した場合の後始末。
    */
   private failAndReset(): void {
@@ -702,6 +923,28 @@ export class WorkDetail {
     this.resetState();
   }
 
+  private disposeSlideEntries(): void {
+    this.slideEntries.forEach((entry) => {
+      entry.hover?.dispose();
+
+      if (entry.videoHandle) {
+        /* videoHandle.dispose()がtexture.disposeも兼ねる */
+        entry.videoHandle.dispose();
+      } else {
+        entry.texture?.dispose();
+      }
+
+      if (!entry.hover) {
+        gsap.killTweensOf(entry.mesh.material);
+        (entry.mesh.material as any).dispose();
+      }
+
+      this.slideGroup.remove(entry.mesh);
+    });
+
+    this.slideEntries = [];
+  }
+
   private resetState(): void {
     this.isOpen = false;
 
@@ -709,18 +952,19 @@ export class WorkDetail {
     this.root.setAttribute("aria-hidden", "true");
     document.body.classList.remove("has-open-work-detail");
 
-    this.slideObserver?.disconnect();
-    this.slideObserver = null;
+    this.observer?.kill();
+    this.observer = null;
 
-    if (this.scrollDebounceId !== null) {
-      window.clearTimeout(this.scrollDebounceId);
-      this.scrollDebounceId = null;
-    }
+    this.destroyPointerEvents();
+    this.destroyResizeHandler();
 
-    this.scrollEl.removeEventListener(
-      "scroll",
-      this.handleInfiniteScroll,
-    );
+    this.hoveredEntry?.hover?.setActive(false);
+    this.hoveredEntry = null;
+    this.cursor?.leave();
+
+    this.vimeoFrameEl.style.visibility = "hidden";
+    this.vimeoFrameEl.style.opacity = "0";
+    this.vimeoFrameEl.removeAttribute("src");
 
     this.heroEl?.remove();
     this.heroEl = null;
@@ -729,130 +973,37 @@ export class WorkDetail {
     gsap.set(this.panelEl, { autoAlpha: 1, x: 0 });
 
     gsap.set(
-      [this.scrollEl, this.railEl, this.titleEl, this.closeEl],
+      [this.railEl, this.titleEl, this.closeEl],
       { autoAlpha: 0 },
     );
 
-    this.scrollEl.style.visibility = "hidden";
     this.railEl.style.visibility = "hidden";
     this.titleEl.style.visibility = "hidden";
     this.closeEl.style.visibility = "hidden";
 
-    this.scrollEl.innerHTML = "";
     this.railEl.innerHTML = "";
 
-    this.slideEls = [];
+    this.disposeSlideEntries();
+
     this.railItemEls = [];
-    this.mediaInfos = [];
+    this.slideSources = [];
     this.mediaCount = 0;
     this.hasLoop = false;
+    this.activeIndexFloat = 0;
     this.activeRealIndex = 0;
 
+    if (this.currentSlug) {
+      document.dispatchEvent(
+        new CustomEvent("portfolio:setVisible", {
+          detail: { slug: this.currentSlug, visible: true },
+        }),
+      );
+    }
+
     this.currentSlug = null;
-    this.originMediaEl = null;
-
-    if (this.originItemEl) {
-      this.originItemEl.style.visibility = "";
-      this.originItemEl = null;
-    }
+    this.originRect = null;
+    this.originImageUrl = null;
   }
-
-  /**
-   * 画面左のパネルを長押しドラッグして左にスワイプすると閉じる。
-   * 横方向への動きだけを検知し、縦方向は通常のスクロールに任せる。
-   */
-  private handlePointerDown = (event: PointerEvent): void => {
-    if (!this.isOpen) {
-      return;
-    }
-
-    this.dragState = {
-      active: true,
-      startX: event.clientX,
-      startY: event.clientY,
-      mode: "none",
-    };
-
-    window.addEventListener("pointermove", this.handlePointerMove);
-    window.addEventListener("pointerup", this.handlePointerUp, {
-      once: true,
-    });
-  };
-
-  private handlePointerMove = (event: PointerEvent): void => {
-    if (!this.dragState.active) {
-      return;
-    }
-
-    const dx = event.clientX - this.dragState.startX;
-    const dy = event.clientY - this.dragState.startY;
-
-    if (this.dragState.mode === "none") {
-      if (Math.abs(dx) < 10 && Math.abs(dy) < 10) {
-        return;
-      }
-
-      this.dragState.mode =
-        Math.abs(dx) > Math.abs(dy) && dx < 0
-          ? "horizontal"
-          : "vertical";
-    }
-
-    if (this.dragState.mode === "horizontal") {
-      event.preventDefault();
-
-      this.suppressSlideClick = true;
-
-      /*
-       * 画面端まで手動でドラッグさせなくても、
-       * 閾値を超えた時点で自動的に閉じ切る。
-       */
-      if (dx <= -SWIPE_CLOSE_THRESHOLD) {
-        this.finishSwipeDrag();
-        return;
-      }
-
-      gsap.set(this.panelEl, { x: dx });
-    }
-  };
-
-  private finishSwipeDrag(): void {
-    window.removeEventListener("pointermove", this.handlePointerMove);
-
-    this.dragState.active = false;
-    this.dragState.mode = "none";
-
-    this.closeBySwipe();
-
-    window.setTimeout(() => {
-      this.suppressSlideClick = false;
-    }, 50);
-  }
-
-  private handlePointerUp = (event: PointerEvent): void => {
-    window.removeEventListener("pointermove", this.handlePointerMove);
-
-    const dx = event.clientX - this.dragState.startX;
-
-    if (this.dragState.mode === "horizontal") {
-      if (dx <= -SWIPE_CLOSE_THRESHOLD) {
-        this.closeBySwipe();
-      } else {
-        gsap.to(this.panelEl, {
-          x: 0,
-          duration: 0.3,
-          ease: "power2.out",
-        });
-      }
-
-      window.setTimeout(() => {
-        this.suppressSlideClick = false;
-      }, 50);
-    }
-
-    this.dragState.active = false;
-    this.dragState.mode = "none";
-  };
 
   public destroy(): void {
     document.removeEventListener(
@@ -862,22 +1013,20 @@ export class WorkDetail {
 
     this.closeEl.removeEventListener("click", this.closeToOrigin);
     this.closeZoneEl.removeEventListener("click", this.closeToOrigin);
-    this.panelEl.removeEventListener(
-      "pointerdown",
-      this.handlePointerDown,
-    );
 
-    window.removeEventListener("pointermove", this.handlePointerMove);
-
-    this.scrollEl.removeEventListener(
-      "scroll",
-      this.handleInfiniteScroll,
-    );
+    this.observer?.kill();
+    this.destroyPointerEvents();
+    this.destroyResizeHandler();
 
     this.cursor?.destroy();
     this.cursor = null;
 
-    this.slideObserver?.disconnect();
+    this.disposeSlideEntries();
+    this.sharedGeometry.dispose();
+
+    this.world?.scene.remove(this.slideGroup);
+
+    this.vimeoFrameEl.remove();
     this.heroEl?.remove();
   }
 }

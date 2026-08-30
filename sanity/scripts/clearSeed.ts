@@ -8,7 +8,7 @@ const client = getCliClient({
 
 async function clearSeed() {
   const ids = Array.from(
-    { length: 20 },
+    { length: 40 },
     (_, index) =>
       `sample-portfolio-${String(index + 1).padStart(2, '0')}`,
   )
@@ -21,7 +21,7 @@ async function clearSeed() {
 
   await transaction.commit()
 
-  console.log('✅ サンプルデータ20件を削除しました')
+  console.log('✅ サンプルデータ40件を削除しました')
 }
 
 clearSeed().catch((error) => {

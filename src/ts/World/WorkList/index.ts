@@ -1,3 +1,4 @@
+import * as THREE from "three/webgpu";
 import gsap from "gsap";
 // gsap の型定義がWindows上で大文字小文字の衝突を起こすため抑制 (see: gsap/types/index.d.ts の draggable.d.ts 参照)
 // @ts-ignore
@@ -5,260 +6,310 @@ import { Draggable } from "gsap/Draggable";
 // @ts-ignore
 import { InertiaPlugin } from "gsap/InertiaPlugin";
 
-import { urlFor } from "../../Sanity"; import { fetchVimeoInfo } from "../../utils/vimeo";
+import { getOrCreateWorld, type WorldContext } from "../index";
+import { urlFor } from "../../Sanity";
+import { fetchVimeoInfo, getVimeoId } from "../../utils/vimeo";
+import { createVideoTexture, type VideoTextureHandle } from "../../utils/media";
 import { HoverInvertCursor } from "../../utils/HoverInvertCursor";
+import type { PortfolioSummary } from "../../../types/portfolio";
+
 gsap.registerPlugin(Draggable, InertiaPlugin);
 
 /**
- * 列数の切り替えポイント。
- * WorkList.scss の @media breakpoint と揃える必要がある。
+ * 列数の切り替えポイント。旧DOM実装(WorkList.scss)のbreakpointを踏襲。
  */
 const COLUMN_BREAKPOINTS = [
-  { minWidth: 1440, columns: 5 },
-  { minWidth: 1024, columns: 4 },
-  { minWidth: 640, columns: 3 },
-  { minWidth: 0, columns: 2 },
+  { minWidth: 1440, columns: 5, cardWidth: 260, columnGap: 100, rowGap: 120, padding: 160 },
+  { minWidth: 1024, columns: 4, cardWidth: 220, columnGap: 70, rowGap: 100, padding: 100 },
+  { minWidth: 640, columns: 3, cardWidth: 190, columnGap: 50, rowGap: 80, padding: 70 },
+  { minWidth: 0, columns: 2, cardWidth: 160, columnGap: 40, rowGap: 60, padding: 40 },
 ];
 
+/** サムネイルのアスペクト比(幅/高さ)。サンプル画像に合わせて300:169。 */
+const ASPECT_RATIO = 300 / 169;
+
+interface PlaneEntry {
+  portfolio: PortfolioSummary;
+  /** THREE.Mesh(three/webgpuには@types/threeのサブパス型定義が無いためany)。 */
+  mesh: any;
+  material: any;
+  /** ホバー時の拡大に対する基準スケール(world単位)。 */
+  baseScale: { x: number; y: number };
+  /** サムネイルが動画の場合の再生ハンドル(dispose用)。 */
+  videoHandle: VideoTextureHandle | null;
+}
+
+interface ScreenRect {
+  top: number;
+  left: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * 作品一覧をDOMではなくThree.jsのPlaneGeometryで描画するギャラリー。
+ * WaterBackgroundと同じCanvas/Sceneに統合される(getOrCreateWorld参照)。
+ */
 export class WorkList {
   private readonly root: HTMLElement;
-  private readonly world: HTMLElement;
-  private readonly items: HTMLElement[];
+  private readonly portfolios: PortfolioSummary[];
 
-  private columnElements: HTMLElement[] = [];
+  private world: WorldContext | null = null;
+  private readonly group = new THREE.Group();
+  private readonly textureLoader = new THREE.TextureLoader();
+  private readonly sharedGeometry = new THREE.PlaneGeometry(1, 1);
+
+  private entries: PlaneEntry[] = [];
+
+  private trackWidthPx = 0;
+  private trackHeightPx = 0;
 
   private draggable: Draggable | null = null;
-  private resizeObserver: ResizeObserver | null = null;
-  private resizeFrame: number | null = null;
-
-  private hoverCleanups: Array<() => void> = [];
-
   private suppressClick = false;
 
+  private readonly raycaster = new THREE.Raycaster();
+  private readonly pointerNdc = new THREE.Vector2();
+  private hoveredEntry: PlaneEntry | null = null;
+
   private cursor: HoverInvertCursor | null = null;
-  private videoObserver: IntersectionObserver | null = null;
+
+  private resizeObserver: ResizeObserver | null = null;
+  private resizeFrame: number | null = null;
 
   constructor(root: HTMLElement) {
     this.root = root;
 
-    const world = root.querySelector<HTMLElement>(
-      "[data-portfolio-world]",
+    const dataEl = root.querySelector<HTMLScriptElement>(
+      "[data-portfolio-data]",
     );
 
-    if (!world) {
-      throw new Error("WorkList world was not found.");
-    }
+    this.portfolios = dataEl?.textContent
+      ? (JSON.parse(dataEl.textContent) as PortfolioSummary[])
+      : [];
 
-    this.world = world;
-
-    this.items = Array.from(
-      root.querySelectorAll<HTMLElement>("[data-portfolio-item]"),
-    );
+    this.textureLoader.crossOrigin = "anonymous";
   }
 
   public init(): void {
-    this.resolveMedia();
-    this.buildColumns();
-    this.initAnimation();
-    this.initDrag();
-    this.cursor = new HoverInvertCursor(document.body);
-    this.initHover();
-    this.initClickGuard();
-    this.initResizeObserver();
-  }
+    const container = document.querySelector<HTMLDivElement>(
+      "[data-water-background]",
+    );
 
-  /**
-   * data-image-ref から Sanity の画像URLを解決して背景に設定する。
-   * data-vimeo-url は画面に入ってからiframeを生成して自動再生する(遅延読み込み)。
-   */
-  private resolveMedia(): void {
-    this.items.forEach((item) => {
-      const imageMedia = item.querySelector<HTMLElement>(
-        "[data-image-ref]",
-      );
-
-      const ref = imageMedia?.dataset.imageRef;
-
-      if (imageMedia && ref) {
-        const url = urlFor({
-          _type: "image",
-          asset: { _type: "reference", _ref: ref },
-        })
-          .width(600)
-          .url();
-
-        imageMedia.style.backgroundImage = `url(${url})`;
-      }
-
-      const videoMedia = item.querySelector<HTMLElement>(
-        "[data-vimeo-url]",
-      );
-
-      const vimeoUrl = videoMedia?.dataset.vimeoUrl;
-
-      if (videoMedia && vimeoUrl) {
-        this.observeVideo(videoMedia, vimeoUrl);
-      }
-    });
-  }
-
-  /**
-   * 動画は画面内に入ってから読み込む(多数のiframeを同時再生しないための対策)。
-   * 処理負荷が気になる場合は、この閾値/rootMarginを調整するか
-   * ホバー時にのみ読み込む方式に変更してください。
-   */
-  private observeVideo(target: HTMLElement, vimeoUrl: string): void {
-    if (!this.videoObserver) {
-      this.videoObserver = new IntersectionObserver(
-        (entries) => {
-          entries.forEach((entry) => {
-            if (!entry.isIntersecting) {
-              return;
-            }
-
-            const el = entry.target as HTMLElement;
-            const url = el.dataset.vimeoUrl;
-
-            this.videoObserver?.unobserve(el);
-
-            if (url) {
-              this.loadVideo(el, url);
-            }
-          });
-        },
-        {
-          root: this.root,
-          rootMargin: "200px",
-        },
-      );
-    }
-
-    this.videoObserver.observe(target);
-  }
-
-  private async loadVideo(
-    target: HTMLElement,
-    vimeoUrl: string,
-  ): Promise<void> {
-    const info = await fetchVimeoInfo(vimeoUrl);
-
-    if (!info) {
+    if (!container) {
       return;
     }
 
-    if (info.posterUrl) {
-      target.style.backgroundImage = `url(${info.posterUrl})`;
+    this.world = getOrCreateWorld(container);
+    this.world.scene.add(this.group);
+
+    this.cursor = new HoverInvertCursor(document.body);
+
+    this.buildPlanes();
+    this.layout();
+    this.initEntranceAnimation();
+    this.initDrag();
+    this.initPointerEvents();
+    this.initResizeObserver();
+
+    document.addEventListener(
+      "portfolio:setVisible",
+      this.handleSetVisible as EventListener,
+    );
+  }
+
+  /**
+   * PlaneGeometryはすべて1x1の単位サイズで作り、実サイズはmesh.scaleで表現する。
+   */
+  private buildPlanes(): void {
+    this.entries = this.portfolios.map((portfolio) => {
+      const material = new THREE.MeshBasicMaterial({
+        color: 0x1a1a1a,
+        transparent: true,
+        opacity: 1,
+      });
+
+      const mesh = new THREE.Mesh(this.sharedGeometry, material);
+
+      this.group.add(mesh);
+
+      const entry: PlaneEntry = {
+        portfolio,
+        mesh,
+        material,
+        baseScale: { x: 1, y: 1 },
+        videoHandle: null,
+      };
+
+      this.loadMedia(entry);
+
+      return entry;
+    });
+  }
+
+  /**
+   * SanityのCDN画像・Vimeoのサムネイル画像・直接動画URLをテクスチャとして読み込む。
+   * "vimeo"タイプでも実際のvimeo.com URLでない場合(過去データ)は
+   * 直接動画URLとして扱う。
+   */
+  private async loadMedia(entry: PlaneEntry): Promise<void> {
+    const media = entry.portfolio.thumbnailMedia;
+
+    if (media.type === "video" || (media.type === "vimeo" && !getVimeoId(media.vimeoUrl))) {
+      const videoUrl = media.type === "video" ? media.videoUrl : media.vimeoUrl;
+
+      entry.videoHandle = createVideoTexture(videoUrl);
+      entry.material.map = entry.videoHandle.texture;
+      entry.material.color.set(0xffffff);
+      entry.material.needsUpdate = true;
+      return;
     }
 
-    const iframe = document.createElement("iframe");
-    iframe.src = info.embedUrl;
-    iframe.allow = "autoplay; fullscreen";
-    iframe.setAttribute("loading", "lazy");
+    const url =
+      media.type === "img"
+        ? urlFor(media.image).width(600).url()
+        : ((await fetchVimeoInfo(media.vimeoUrl))?.posterUrl ?? null);
 
-    target.appendChild(iframe);
-  }
+    if (!url) {
+      return;
+    }
 
-  /**
-   * 作品を縦一列(flex-direction: column)ずつの列に振り分け、
-   * その列同士を display:flex で横並びにする。
-   *
-   * GSAPではなく自前のDOM操作。
-   */
-  private buildColumns(): void {
-    const columnCount = this.getColumnCount();
-
-    this.columnElements.forEach((column) => column.remove());
-
-    const columns: HTMLElement[] = Array.from(
-      { length: columnCount },
-      () => {
-        const column = document.createElement("div");
-        column.className = "portfolio-canvas__column";
-        return column;
-      },
-    );
-
-    this.items.forEach((item, index) => {
-      columns[index % columnCount].appendChild(item);
-    });
-
-    columns.forEach((column) => this.world.appendChild(column));
-
-    this.columnElements = columns;
-
-    this.applyStagger();
-  }
-
-  /**
-   * 隣の列を先頭画像の高さの半分だけ下にずらす。
-   *
-   * ┌────┐
-   * │    │
-   * └────┘
-   *      ┌────┐
-   *      │    │
-   *      └────┘
-   *
-   * GSAPではなく素のstyle操作。
-   */
-  private applyStagger(): void {
-    this.columnElements.forEach((column, index) => {
-      const firstItem =
-        column.firstElementChild as HTMLElement | null;
-
-      const offset =
-        index % 2 === 1 && firstItem
-          ? firstItem.offsetHeight / 2
-          : 0;
-
-      column.style.marginTop = `${offset}px`;
+    this.textureLoader.load(url, (texture: any) => {
+      texture.colorSpace = THREE.SRGBColorSpace;
+      entry.material.map = texture;
+      entry.material.color.set(0xffffff);
+      entry.material.needsUpdate = true;
     });
   }
 
-  private getColumnCount(): number {
+  private getBreakpoint(): (typeof COLUMN_BREAKPOINTS)[number] {
     const width = this.root.clientWidth;
 
-    const match = COLUMN_BREAKPOINTS.find(
-      (breakpoint) => width >= breakpoint.minWidth,
+    return (
+      COLUMN_BREAKPOINTS.find((bp) => width >= bp.minWidth) ??
+      COLUMN_BREAKPOINTS[COLUMN_BREAKPOINTS.length - 1]
     );
+  }
 
-    return match?.columns ?? 2;
+  /**
+   * 縦一列ずつ積み上げ、奇数列を半分だけ下にずらす(旧DOM実装と同じロジック)。
+   * 座標計算はCSSのtop-left基準(x右・y下)で行い、最後にworld座標へ変換する。
+   */
+  private layout(): void {
+    if (!this.world) {
+      return;
+    }
+
+    const { columns, cardWidth, columnGap, rowGap, padding } =
+      this.getBreakpoint();
+
+    const cardHeight = cardWidth / ASPECT_RATIO;
+
+    const columnY = Array.from({ length: columns }, () => padding);
+    const initializedColumns = Array.from({ length: columns }, () => false);
+
+    const pixelsToWorld = this.world.getPixelsToWorld();
+
+    const viewportWidth = this.root.clientWidth;
+    const viewportHeight = this.root.clientHeight;
+
+    /*
+     * ビューポート左上を world原点として、そこからpx→world変換する。
+     */
+    const originX = (-viewportWidth / 2) * pixelsToWorld;
+    const originY = (viewportHeight / 2) * pixelsToWorld;
+
+    this.entries.forEach((entry, index) => {
+      const column = index % columns;
+
+      if (!initializedColumns[column]) {
+        if (column % 2 === 1) {
+          columnY[column] += cardHeight / 2;
+        }
+
+        initializedColumns[column] = true;
+      }
+
+      const xPx =
+        padding + column * (cardWidth + columnGap) + cardWidth / 2;
+      const yPx = columnY[column] + cardHeight / 2;
+
+      entry.mesh.position.set(
+        originX + xPx * pixelsToWorld,
+        originY - yPx * pixelsToWorld,
+        0,
+      );
+
+      entry.baseScale = {
+        x: cardWidth * pixelsToWorld,
+        y: cardHeight * pixelsToWorld,
+      };
+
+      entry.mesh.scale.set(entry.baseScale.x, entry.baseScale.y, 1);
+
+      columnY[column] += cardHeight + rowGap;
+    });
+
+    this.trackWidthPx =
+      padding * 2 + columns * cardWidth + (columns - 1) * columnGap;
+
+    this.trackHeightPx = Math.max(...columnY) + padding;
   }
 
   /**
    * 初期表示アニメーション。ここはGSAP。
    */
-  private initAnimation(): void {
-    gsap.fromTo(
-      this.items,
-      {
-        autoAlpha: 0,
-        scale: 0.96,
-      },
-      {
-        autoAlpha: 1,
-        scale: 1,
-        duration: 1,
-        stagger: {
-          amount: 0.5,
-          from: "random",
+  private initEntranceAnimation(): void {
+    this.entries.forEach((entry) => {
+      const delay = Math.random() * 0.5;
+
+      gsap.fromTo(
+        entry.mesh.scale,
+        {
+          x: entry.baseScale.x * 0.96,
+          y: entry.baseScale.y * 0.96,
         },
-        ease: "power3.out",
-      },
-    );
+        {
+          x: entry.baseScale.x,
+          y: entry.baseScale.y,
+          duration: 1,
+          delay,
+          ease: "power3.out",
+        },
+      );
+
+      gsap.fromTo(
+        entry.material,
+        { opacity: 0 },
+        { opacity: 1, duration: 1, delay, ease: "power3.out" },
+      );
+    });
   }
 
   /**
-   * Palmer風ドラッグ。Draggable + InertiaPlugin。
+   * Palmer風ドラッグ。GSAPはCSS値しか直接操作できないため、
+   * 透明なヒットテスト層(root)自体をDraggableで動かし、
+   * そのx/yをThree.jsのgroup位置に変換して反映する。
    */
   private initDrag(): void {
     this.draggable?.kill();
+    gsap.set(this.root, { x: 0, y: 0 });
+    this.group.position.set(0, 0, 0);
 
-    const instances = Draggable.create(this.world, {
+    const syncGroup = (instance: Draggable): void => {
+      if (!this.world) {
+        return;
+      }
+
+      const pixelsToWorld = this.world.getPixelsToWorld();
+
+      this.group.position.x = instance.x * pixelsToWorld;
+      this.group.position.y = -instance.y * pixelsToWorld;
+    };
+
+    const instances = Draggable.create(this.root, {
       type: "x,y",
       inertia: true,
-      dragClickables: true,
-      bounds: this.getDragBounds(),
+      bounds: this.getDragBoundsPx(),
       edgeResistance: 0.8,
       cursor: "grab",
       activeCursor: "grabbing",
@@ -267,7 +318,15 @@ export class WorkList {
         this.root.classList.add("is-dragging");
       },
 
-      onDrag: () => {
+      onDrag: function () {
+        syncGroup(this as Draggable);
+      },
+
+      onThrowUpdate: function () {
+        syncGroup(this as Draggable);
+      },
+
+      onDragStart: () => {
         this.suppressClick = true;
       },
 
@@ -275,8 +334,7 @@ export class WorkList {
         this.root.classList.remove("is-dragging");
 
         /*
-         * drag後にリンク/ボタンのクリックが
-         * 発火するのを防止。
+         * drag後にクリックが発火してしまうのを防止。
          */
         window.setTimeout(() => {
           this.suppressClick = false;
@@ -287,7 +345,7 @@ export class WorkList {
     this.draggable = instances[0] ?? null;
   }
 
-  private getDragBounds(): {
+  private getDragBoundsPx(): {
     minX: number;
     maxX: number;
     minY: number;
@@ -295,115 +353,180 @@ export class WorkList {
   } {
     const viewportWidth = this.root.clientWidth;
     const viewportHeight = this.root.clientHeight;
-    const worldWidth = this.world.offsetWidth;
-    const worldHeight = this.world.offsetHeight;
 
     return {
-      minX: Math.min(0, viewportWidth - worldWidth),
+      minX: Math.min(0, viewportWidth - this.trackWidthPx),
       maxX: 0,
-      minY: Math.min(0, viewportHeight - worldHeight),
+      minY: Math.min(0, viewportHeight - this.trackHeightPx),
       maxY: 0,
     };
   }
 
-  /**
-   * Hover Animation。拡大はGSAP、
-   * カーソルの追従・色反転オーバーは HoverInvertCursor に任せる。
-   */
-  private initHover(): void {
-    this.items.forEach((item) => {
-      const media = item.querySelector<HTMLElement>(
-        "[data-portfolio-media]",
-      );
+  private initPointerEvents(): void {
+    this.root.addEventListener("click", this.handleClick);
+    this.root.addEventListener("pointermove", this.handlePointerMove);
+    this.root.addEventListener("pointerleave", this.handlePointerLeave);
+  }
 
-      if (!media) {
-        return;
-      }
+  private raycastAt(clientX: number, clientY: number): PlaneEntry | null {
+    if (!this.world) {
+      return null;
+    }
 
-      const handleEnter = (event: PointerEvent) => {
-        gsap.to(media, {
-          scale: 1.08,
-          duration: 0.6,
-          ease: "power3.out",
-          overwrite: true,
-        });
+    this.pointerNdc.x = (clientX / window.innerWidth) * 2 - 1;
+    this.pointerNdc.y = -(clientY / window.innerHeight) * 2 + 1;
 
-        const label = item.dataset.slug ? "Discover →" : "Back →";
-        this.cursor?.enter(media, label, event.clientX, event.clientY);
-      };
+    this.raycaster.setFromCamera(
+      this.pointerNdc,
+      this.world.cameraController.camera,
+    );
 
-      const handleMove = (event: PointerEvent) => {
-        this.cursor?.move(event.clientX, event.clientY);
-      };
+    const meshes = this.entries.map((entry) => entry.mesh);
+    const intersections = this.raycaster.intersectObjects(meshes, false);
 
-      const handleLeave = () => {
-        gsap.to(media, {
-          scale: 1,
-          duration: 0.6,
-          ease: "power3.out",
-          overwrite: true,
-        });
+    if (intersections.length === 0) {
+      return null;
+    }
 
-        this.cursor?.leave();
-      };
+    const hitMesh = intersections[0].object;
 
-      item.addEventListener("pointerenter", handleEnter);
-      item.addEventListener("pointermove", handleMove);
-      item.addEventListener("pointerleave", handleLeave);
-
-      this.hoverCleanups.push(() => {
-        item.removeEventListener("pointerenter", handleEnter);
-        item.removeEventListener("pointermove", handleMove);
-        item.removeEventListener("pointerleave", handleLeave);
-      });
-    });
+    return this.entries.find((entry) => entry.mesh === hitMesh) ?? null;
   }
 
   /**
-   * Dragしたときにボタンのクリックが発火してしまうのを防ぐ。
-   * ドラッグでなければ作品詳細(WorkDetail)を開くイベントを発火する。
+   * Planeの画面上の投影矩形を計算する。WorkDetail側のFLIPアニメーションの起点に使う。
    */
-  private initClickGuard(): void {
-    this.root.addEventListener("click", this.handleClick, true);
+  private worldToScreenRect(entry: PlaneEntry): ScreenRect {
+    const camera = this.world!.cameraController.camera;
+
+    const halfWidth = entry.mesh.scale.x / 2;
+    const halfHeight = entry.mesh.scale.y / 2;
+
+    const worldPos = entry.mesh.getWorldPosition(new THREE.Vector3());
+
+    const toScreen = (offsetX: number, offsetY: number) => {
+      const projected = worldPos
+        .clone()
+        .add(new THREE.Vector3(offsetX, offsetY, 0))
+        .project(camera);
+
+      return {
+        x: (projected.x * 0.5 + 0.5) * window.innerWidth,
+        y: (-projected.y * 0.5 + 0.5) * window.innerHeight,
+      };
+    };
+
+    const topLeft = toScreen(-halfWidth, halfHeight);
+    const bottomRight = toScreen(halfWidth, -halfHeight);
+
+    return {
+      top: topLeft.y,
+      left: topLeft.x,
+      width: bottomRight.x - topLeft.x,
+      height: bottomRight.y - topLeft.y,
+    };
   }
 
   private handleClick = (event: MouseEvent): void => {
-    const target = event.target as HTMLElement;
-    const item = target.closest<HTMLElement>(
-      "[data-portfolio-item]",
-    );
-
-    if (!item) {
-      return;
-    }
-
     if (this.suppressClick) {
-      event.preventDefault();
-      event.stopPropagation();
       return;
     }
 
-    const media = item.querySelector<HTMLElement>(
-      "[data-portfolio-media]",
-    );
+    const entry = this.raycastAt(event.clientX, event.clientY);
 
-    const slug = item.dataset.slug;
-    const title = item.dataset.title ?? "";
-
-    if (!media || !slug) {
+    if (!entry) {
       return;
     }
+
+    const rect = this.worldToScreenRect(entry);
+    const texture = entry.material.map as any;
+    /*
+     * VideoTextureの場合、動画フレームはstatic画像のsrcを持たないため、
+     * FLIPアニメーションのヒーロー画像は背景色のみのフォールバックにする。
+     */
+    const imageUrl =
+      texture instanceof THREE.VideoTexture
+        ? null
+        : ((texture?.image as HTMLImageElement | undefined)?.src ?? null);
 
     document.dispatchEvent(
       new CustomEvent("worklist:open", {
-        detail: { slug, title, media },
+        detail: {
+          slug: entry.portfolio.slug.current,
+          title: entry.portfolio.title,
+          rect,
+          imageUrl,
+        },
       }),
     );
   };
 
+  private handlePointerMove = (event: PointerEvent): void => {
+    const entry = this.raycastAt(event.clientX, event.clientY);
+
+    if (entry !== this.hoveredEntry) {
+      if (this.hoveredEntry) {
+        this.setHoverScale(this.hoveredEntry, 1);
+      }
+
+      this.hoveredEntry = entry;
+
+      if (entry) {
+        this.setHoverScale(entry, 1.08);
+
+        const label = entry.portfolio.slug.current
+          ? "Discover →"
+          : "Back →";
+
+        this.cursor?.enter(label, event.clientX, event.clientY);
+      } else {
+        this.cursor?.leave();
+      }
+
+      return;
+    }
+
+    if (entry) {
+      this.cursor?.move(event.clientX, event.clientY);
+    }
+  };
+
+  private handlePointerLeave = (): void => {
+    if (this.hoveredEntry) {
+      this.setHoverScale(this.hoveredEntry, 1);
+      this.hoveredEntry = null;
+    }
+
+    this.cursor?.leave();
+  };
+
+  private setHoverScale(entry: PlaneEntry, multiplier: number): void {
+    gsap.to(entry.mesh.scale, {
+      x: entry.baseScale.x * multiplier,
+      y: entry.baseScale.y * multiplier,
+      duration: 0.6,
+      ease: "power3.out",
+      overwrite: true,
+    });
+  }
+
   /**
-   * Responsive。ResizeObserverはブラウザ標準API。
+   * WorkDetailが開いている間、選択中の作品のPlaneを隠す
+   * (背景に薄く二重表示されるのを防ぐ)。
    */
+  private handleSetVisible = (
+    event: CustomEvent<{ slug: string; visible: boolean }>,
+  ): void => {
+    const entry = this.entries.find(
+      (candidate) =>
+        candidate.portfolio.slug.current === event.detail.slug,
+    );
+
+    if (entry) {
+      entry.mesh.visible = event.detail.visible;
+    }
+  };
+
   private initResizeObserver(): void {
     this.resizeObserver = new ResizeObserver(() => {
       if (this.resizeFrame !== null) {
@@ -411,17 +534,13 @@ export class WorkList {
       }
 
       this.resizeFrame = requestAnimationFrame(() => {
-        this.handleResize();
+        this.layout();
+        this.initDrag();
         this.resizeFrame = null;
       });
     });
 
     this.resizeObserver.observe(this.root);
-  }
-
-  private handleResize(): void {
-    this.buildColumns();
-    this.initDrag();
   }
 
   public destroy(): void {
@@ -435,25 +554,35 @@ export class WorkList {
       cancelAnimationFrame(this.resizeFrame);
     }
 
-    this.hoverCleanups.forEach((cleanup) => cleanup());
-    this.hoverCleanups = [];
+    this.root.removeEventListener("click", this.handleClick);
+    this.root.removeEventListener("pointermove", this.handlePointerMove);
+    this.root.removeEventListener("pointerleave", this.handlePointerLeave);
+
+    document.removeEventListener(
+      "portfolio:setVisible",
+      this.handleSetVisible as EventListener,
+    );
 
     this.cursor?.destroy();
     this.cursor = null;
 
-    this.videoObserver?.disconnect();
-    this.videoObserver = null;
+    gsap.killTweensOf(this.entries.map((entry) => entry.mesh.scale));
+    gsap.killTweensOf(this.entries.map((entry) => entry.material));
 
-    this.root.removeEventListener("click", this.handleClick, true);
-
-    gsap.killTweensOf(this.items);
-
-    this.items.forEach((item) => {
-      const media = item.querySelector("[data-portfolio-media]");
-
-      if (media) {
-        gsap.killTweensOf(media);
+    this.entries.forEach((entry) => {
+      if (entry.videoHandle) {
+        entry.videoHandle.dispose();
+      } else {
+        entry.material.map?.dispose();
       }
+
+      entry.material.dispose();
+      this.group.remove(entry.mesh);
     });
+
+    this.sharedGeometry.dispose();
+    this.entries = [];
+
+    this.world?.scene.remove(this.group);
   }
 }
