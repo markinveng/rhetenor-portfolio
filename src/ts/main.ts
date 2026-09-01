@@ -1,5 +1,6 @@
 import { WorkList } from "./World/WorkList";
 import { WorkDetail } from "./World/WorkDetail";
+import { getOrCreateCursor, disposeCursor } from "./Cursor";
 
 /*
  * サイト全体のJavaScriptエントリポイント。
@@ -10,6 +11,7 @@ class App {
   private workDetails: WorkDetail[] = [];
 
   public init(): void {
+    getOrCreateCursor();
     this.initWorkList();
     this.initWorkDetail();
   }
@@ -20,6 +22,8 @@ class App {
 
     this.workLists = [];
     this.workDetails = [];
+
+    disposeCursor();
   }
 
   private initWorkList(): void {

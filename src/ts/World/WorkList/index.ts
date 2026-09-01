@@ -9,7 +9,7 @@ import { InertiaPlugin } from "gsap/InertiaPlugin";
 import { getOrCreateWorld, type WorldContext } from "../index";
 import { urlFor } from "../../Sanity";
 import { createVideoTexture, type VideoTextureHandle } from "../../utils/media";
-import { HoverInvertCursor } from "../../utils/HoverInvertCursor";
+import { getOrCreateCursor, type CursorController } from "../../Cursor";
 import type { PortfolioSummary } from "../../../types/portfolio";
 
 gsap.registerPlugin(Draggable, InertiaPlugin);
@@ -80,7 +80,7 @@ export class WorkList {
   private readonly pointerNdc = new THREE.Vector2();
   private hoveredEntry: PlaneEntry | null = null;
 
-  private cursor: HoverInvertCursor | null = null;
+  private cursor: CursorController | null = null;
 
   private resizeObserver: ResizeObserver | null = null;
   private resizeFrame: number | null = null;
@@ -111,7 +111,7 @@ export class WorkList {
     this.world = getOrCreateWorld(container);
     this.world.scene.add(this.group);
 
-    this.cursor = new HoverInvertCursor(document.body);
+    this.cursor = getOrCreateCursor();
 
     this.dragProxy.style.position = "fixed";
     this.dragProxy.style.top = "0";
@@ -335,8 +335,6 @@ export class WorkList {
       inertia: true,
       bounds: this.getDragBoundsPx(),
       edgeResistance: 0.8,
-      cursor: "grab",
-      activeCursor: "grabbing",
 
       onPress: () => {
         this.root.classList.add("is-dragging");
@@ -516,20 +514,12 @@ export class WorkList {
       if (entry) {
         this.setHoverScale(entry, 1.08);
 
-        const label = entry.portfolio.slug.current
-          ? "Discover →"
-          : "Back →";
-
-        this.cursor?.enter(label, event.clientX, event.clientY);
+        this.cursor?.setHoverActive(true);
       } else {
-        this.cursor?.leave();
+        this.cursor?.setHoverActive(false);
       }
 
       return;
-    }
-
-    if (entry) {
-      this.cursor?.move(event.clientX, event.clientY);
     }
   };
 
@@ -539,7 +529,7 @@ export class WorkList {
       this.hoveredEntry = null;
     }
 
-    this.cursor?.leave();
+    this.cursor?.setHoverActive(false);
   };
 
   private setHoverScale(entry: PlaneEntry, multiplier: number): void {
@@ -607,7 +597,6 @@ export class WorkList {
       this.handleSetVisible as EventListener,
     );
 
-    this.cursor?.destroy();
     this.cursor = null;
 
     gsap.killTweensOf(this.entries.map((entry) => entry.mesh.scale));

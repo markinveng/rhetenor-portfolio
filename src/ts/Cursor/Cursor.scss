@@ -1,0 +1,73 @@
+/*
+ * サイト共通のカーソル。ネイティブカーソルを非表示にし、
+ * このグレーの点(app-cursor__dot)で置き換える。
+ * 作品詳細のメディアホバー時のみ、反転サークル(app-cursor__label)へ切り替わる。
+ */
+* {
+  cursor: none !important;
+}
+
+.app-cursor {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 9999;
+
+  pointer-events: none;
+  will-change: transform;
+
+  opacity: 0;
+  visibility: hidden;
+}
+
+.app-cursor__dot {
+  position: absolute;
+
+  top: -5px;
+  left: -5px;
+
+  width: 10px;
+  height: 10px;
+
+  border-radius: 50%;
+  background-color: rgba(22, 22, 22, 0.9);
+
+  transform: scale(1);
+  opacity: 1;
+}
+
+.app-cursor__label {
+  position: absolute;
+
+  top: -70px;
+  left: -70px;
+
+  width: 140px;
+  height: 140px;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  border-radius: 50%;
+  background-color: rgba(10, 10, 10, 0.55);
+
+  color: #fff;
+  font-size: 14px;
+  letter-spacing: 0.05em;
+
+  transform: scale(0);
+  opacity: 0;
+}
+
+.app-cursor__swipe {
+  position: absolute;
+
+  top: 22px;
+  left: 26px;
+
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-shadow: 0 0 6px rgba(0, 0, 0, 0.6);
+}

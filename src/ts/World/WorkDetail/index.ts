@@ -14,7 +14,7 @@ import {
   createHoverInvertMaterial,
   type HoverInvertMaterialHandle,
 } from "../../materials/createHoverInvertMaterial";
-import { HoverInvertCursor } from "../../utils/HoverInvertCursor";
+import { getOrCreateCursor, type CursorController } from "../../Cursor";
 import type { MediaItem, Portfolio } from "../../../types/portfolio";
 
 gsap.registerPlugin(Observer);
@@ -138,7 +138,7 @@ export class WorkDetail {
   private panelWorldCenterY = 0;
   private pixelsToWorld = 0;
 
-  private cursor: HoverInvertCursor | null = null;
+  private cursor: CursorController | null = null;
   private hoveredEntry: SlideEntry | null = null;
 
   private readonly raycaster = new THREE.Raycaster();
@@ -183,7 +183,7 @@ export class WorkDetail {
       this.world.scene.add(this.slideGroup);
     }
 
-    this.cursor = new HoverInvertCursor(document.body);
+    this.cursor = getOrCreateCursor();
 
     document.addEventListener(
       "worklist:open",
@@ -644,16 +644,12 @@ export class WorkDetail {
 
       if (entry) {
         entry.hover?.setActive(true);
-        this.cursor?.enter("Discover →", event.clientX, event.clientY);
+        this.cursor?.enterLabel("Discover →");
       } else {
-        this.cursor?.leave();
+        this.cursor?.leaveLabel();
       }
 
       return;
-    }
-
-    if (entry) {
-      this.cursor?.move(event.clientX, event.clientY);
     }
   };
 
@@ -864,7 +860,7 @@ export class WorkDetail {
 
     this.hoveredEntry?.hover?.setActive(false);
     this.hoveredEntry = null;
-    this.cursor?.leave();
+    this.cursor?.leaveLabel();
 
     this.heroEl?.remove();
     this.heroEl = null;
@@ -918,7 +914,6 @@ export class WorkDetail {
     this.destroyPointerEvents();
     this.destroyResizeHandler();
 
-    this.cursor?.destroy();
     this.cursor = null;
 
     this.disposeSlideEntries();
