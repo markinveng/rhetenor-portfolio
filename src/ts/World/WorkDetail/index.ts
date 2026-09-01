@@ -437,6 +437,12 @@ export class WorkDetail {
 
       const hover = createHoverInvertMaterial(texture);
       const mesh = new THREE.Mesh(this.sharedGeometry, hover.material);
+
+      /*
+       * WaterBackground(-1)とWorkListのグリッド(1)より手前に描画し、
+       * 選択中の作品が背景に埋もれないようにする。
+       */
+      mesh.renderOrder = 2;
       this.slideGroup.add(mesh);
 
       const entry: SlideEntry = {

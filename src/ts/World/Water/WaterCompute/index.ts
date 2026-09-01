@@ -17,8 +17,10 @@ import {
 import * as THREE from "three/webgpu";
 
 export const WATER_WIDTH = 128;
-export const WATER_BOUNDS_X = 30;
-export const WATER_BOUNDS_Y = 20;
+
+/** 16:9相当の比率。実際の見た目のサイズはWater側でmesh.scaleにより画面へ合わせる。 */
+export const WATER_BOUNDS_X = 32;
+export const WATER_BOUNDS_Y = 18;
 
 export class WaterCompute {
   public mousePos: any;

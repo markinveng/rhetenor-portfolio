@@ -11,6 +11,9 @@ export default defineConfig( {
 		// @ts-ignore
 		platformProxy: { enabled: false },
 	} ),
+	devToolbar: {
+		enabled: false
+	},
 	vite: {
 		// @ts-ignore vite version mismatch between plugin and astro
 		plugins: [ glslify() ],

@@ -27,6 +27,9 @@ const COLUMN_BREAKPOINTS = [
 /** サムネイルのアスペクト比(幅/高さ)。サンプル画像に合わせて300:169。 */
 const ASPECT_RATIO = 300 / 169;
 
+/** Water背景がうっすら透けて見えるよう、Planeは完全な不透明にはしない。 */
+const REST_OPACITY = 0.9;
+
 interface PlaneEntry {
   portfolio: PortfolioSummary;
   /** THREE.Mesh(three/webgpuには@types/threeのサブパス型定義が無いためany)。 */
@@ -66,6 +69,13 @@ export class WorkList {
   private draggable: Draggable | null = null;
   private suppressClick = false;
 
+  /**
+   * root(ヒットテスト層)自体を動かすと、click/pointer判定に使う
+   * getBoundingClientRectごとビューポート外へずれてしまうため、
+   * Draggableの移動対象は別要素にし、rootはtriggerとしてのみ使う。
+   */
+  private readonly dragProxy = document.createElement("div");
+
   private readonly raycaster = new THREE.Raycaster();
   private readonly pointerNdc = new THREE.Vector2();
   private hoveredEntry: PlaneEntry | null = null;
@@ -103,6 +113,14 @@ export class WorkList {
 
     this.cursor = new HoverInvertCursor(document.body);
 
+    this.dragProxy.style.position = "fixed";
+    this.dragProxy.style.top = "0";
+    this.dragProxy.style.left = "0";
+    this.dragProxy.style.width = "0";
+    this.dragProxy.style.height = "0";
+    this.dragProxy.style.pointerEvents = "none";
+    document.body.appendChild(this.dragProxy);
+
     this.buildPlanes();
     this.layout();
     this.initEntranceAnimation();
@@ -124,10 +142,19 @@ export class WorkList {
       const material = new THREE.MeshBasicMaterial({
         color: 0x1a1a1a,
         transparent: true,
-        opacity: 1,
+        opacity: REST_OPACITY,
+        /*
+         * Waterとz付近で重なるため、深度バッファの取り合いで隐れないようにする。
+         */
+        depthWrite: false,
       });
 
       const mesh = new THREE.Mesh(this.sharedGeometry, material);
+
+      /*
+       * Water(renderOrder=-1)より必ず手前に描画されるようにする。
+       */
+      mesh.renderOrder = 1;
 
       this.group.add(mesh);
 
@@ -268,7 +295,7 @@ export class WorkList {
       gsap.fromTo(
         entry.material,
         { opacity: 0 },
-        { opacity: 1, duration: 1, delay, ease: "power3.out" },
+        { opacity: REST_OPACITY, duration: 1, delay, ease: "power3.out" },
       );
     });
   }
@@ -280,8 +307,16 @@ export class WorkList {
    */
   private initDrag(): void {
     this.draggable?.kill();
-    gsap.set(this.root, { x: 0, y: 0 });
-    this.group.position.set(0, 0, 0);
+
+    const initial = this.getCenteredPositionPx();
+    const pixelsToWorld = this.world?.getPixelsToWorld() ?? 0;
+
+    gsap.set(this.dragProxy, { x: initial.x, y: initial.y });
+    this.group.position.set(
+      initial.x * pixelsToWorld,
+      -initial.y * pixelsToWorld,
+      0,
+    );
 
     const syncGroup = (instance: Draggable): void => {
       if (!this.world) {
@@ -294,7 +329,8 @@ export class WorkList {
       this.group.position.y = -instance.y * pixelsToWorld;
     };
 
-    const instances = Draggable.create(this.root, {
+    const instances = Draggable.create(this.dragProxy, {
+      trigger: this.root,
       type: "x,y",
       inertia: true,
       bounds: this.getDragBoundsPx(),
@@ -347,6 +383,24 @@ export class WorkList {
       maxX: 0,
       minY: Math.min(0, viewportHeight - this.trackHeightPx),
       maxY: 0,
+    };
+  }
+
+  /**
+   * 初期表示時、グリッド全体の中央がビューポート中央に来るオフセットを
+   * ドラッグ範囲内にクランプして求める。
+   */
+  private getCenteredPositionPx(): { x: number; y: number } {
+    const bounds = this.getDragBoundsPx();
+    const viewportWidth = this.root.clientWidth;
+    const viewportHeight = this.root.clientHeight;
+
+    const centerX = (viewportWidth - this.trackWidthPx) / 2;
+    const centerY = (viewportHeight - this.trackHeightPx) / 2;
+
+    return {
+      x: Math.min(Math.max(centerX, bounds.minX), bounds.maxX),
+      y: Math.min(Math.max(centerY, bounds.minY), bounds.maxY),
     };
   }
 
@@ -534,6 +588,8 @@ export class WorkList {
   public destroy(): void {
     this.draggable?.kill();
     this.draggable = null;
+
+    this.dragProxy.remove();
 
     this.resizeObserver?.disconnect();
     this.resizeObserver = null;

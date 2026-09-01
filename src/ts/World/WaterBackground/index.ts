@@ -19,15 +19,45 @@ export default function initWaterBackground(
     water.registerGUI(world.debugGUI.addFolder("Water"));
   }
 
+  const handlePointerMove = (event: PointerEvent): void => {
+    water.updatePointer(
+      event.clientX,
+      event.clientY,
+      world.cameraController.camera,
+    );
+  };
+
+  const handlePointerDown = (): void => {
+    water.setPointerDown(true);
+  };
+
+  const handlePointerUp = (): void => {
+    water.setPointerDown(false);
+  };
+
+  const handlePointerLeave = (): void => {
+    water.clearPointer();
+  };
+
+  window.addEventListener("pointermove", handlePointerMove);
+  window.addEventListener("pointerdown", handlePointerDown);
+  window.addEventListener("pointerup", handlePointerUp);
+  window.addEventListener("pointerleave", handlePointerLeave);
+
   const unregisterUpdate = world.registerUpdate(() => {
     water.update(
       (node, dispatchSize) =>
         world.renderPipeline.compute(node, dispatchSize),
-      false,
+      world.getPixelsToWorld(),
     );
   });
 
   return () => {
+    window.removeEventListener("pointermove", handlePointerMove);
+    window.removeEventListener("pointerdown", handlePointerDown);
+    window.removeEventListener("pointerup", handlePointerUp);
+    window.removeEventListener("pointerleave", handlePointerLeave);
+
     unregisterUpdate();
     water.dispose();
 

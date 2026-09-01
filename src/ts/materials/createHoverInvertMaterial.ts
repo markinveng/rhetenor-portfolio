@@ -58,6 +58,11 @@ export function createHoverInvertMaterial(
   const material = new (THREE as any).MeshBasicNodeMaterial({
     transparent: true,
     map,
+    /*
+     * Water(renderOrder=-1)/WorkList(renderOrder=1)と同じz付近にあるため、
+     * 深度バッファではなくrenderOrderだけで重なり順を決める。
+     */
+    depthWrite: false,
   });
 
   material.colorNode = Fn(() => {

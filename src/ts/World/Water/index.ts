@@ -18,11 +18,14 @@ interface WaterParams {
   simSpeed: number;
 }
 
+/** WATER_BOUNDSぴったりだと画面端に隙間が出ることがあるための余白。 */
+const OVERSCAN = 1.08;
+
 export class Water {
   public mesh: any;
   public params: WaterParams = {
     color: "#99e0ff",
-    opacity: 0.9,
+    opacity: 0.5,
     mouseSizeHover: 0.12,
     mouseDeepHover: 0.5,
     mouseSizeClick: 0.2,
@@ -37,6 +40,11 @@ export class Water {
 
   private pingPong = 0;
   private frameCounter = 0;
+
+  private readonly raycaster = new THREE.Raycaster();
+  private readonly pointerNdc = new THREE.Vector2();
+  private hasPointer = false;
+  private isPointerDown = false;
 
   constructor(scene: any) {
     this.compute = new WaterCompute(
@@ -59,6 +67,11 @@ export class Water {
       transparent: true,
       opacity: this.params.opacity,
       side: THREE.DoubleSide,
+      /*
+       * 画面全体を覆う大きさにした際、WorkListのPlane(同じz付近)と
+       * 深度テストが拮ち合い残存して見えなくなるのを防ぐ。
+       */
+      depthWrite: false,
     });
 
     this.material.normalNode = Fn(() => {
@@ -76,6 +89,12 @@ export class Water {
     })();
 
     this.mesh = new THREE.Mesh(this.geometry, this.material);
+
+    /*
+     * WorkListのPlaneと同じz=0付近にあるため、透明オブジェクトの
+     * 描画順が不定にならないよう明示的に背面へ回す。
+     */
+    this.mesh.renderOrder = -1;
     scene.add(this.mesh);
   }
 
@@ -101,11 +120,65 @@ export class Water {
     return yIndex.mul(WATER_WIDTH).add(xIndex);
   }
 
-  public update(renderPipelineCompute: (node: any, dispatchSize: readonly [number, number, number]) => void, isMouseDown: boolean): void {
-    this.compute.mouseSize.value = isMouseDown
+  /**
+   * 画面上のポインタ座標をraycasterでWaterのローカル座標に変換し、波紋の発生源として渡す。
+   * mesh.worldToLocal()で変換するため、mesh.scale(画面サイズへの拡大)の影響を受けない。
+   */
+  public updatePointer(clientX: number, clientY: number, camera: any): void {
+    this.pointerNdc.x = (clientX / window.innerWidth) * 2 - 1;
+    this.pointerNdc.y = -(clientY / window.innerHeight) * 2 + 1;
+
+    this.raycaster.setFromCamera(this.pointerNdc, camera);
+
+    const hit = this.raycaster.intersectObject(this.mesh, false)[0];
+
+    if (!hit) {
+      return;
+    }
+
+    const local = this.mesh.worldToLocal(hit.point.clone());
+
+    if (this.hasPointer) {
+      this.compute.mouseSpeed.value.set(
+        local.x - this.compute.mousePos.value.x,
+        local.y - this.compute.mousePos.value.y,
+      );
+    }
+
+    this.compute.mousePos.value.set(local.x, local.y);
+    this.hasPointer = true;
+  }
+
+  public setPointerDown(isDown: boolean): void {
+    this.isPointerDown = isDown;
+  }
+
+  /**
+   * ポインタが画面外に出たときに波紋の勢いを止める。
+   */
+  public clearPointer(): void {
+    this.hasPointer = false;
+    this.compute.mouseSpeed.value.set(0, 0);
+  }
+
+  public update(renderPipelineCompute: (node: any, dispatchSize: readonly [number, number, number]) => void, pixelsToWorld: number): void {
+    const visibleWidth = pixelsToWorld * window.innerWidth;
+    const visibleHeight = pixelsToWorld * window.innerHeight;
+
+    /*
+     * WATER_BOUNDS_X/Yはcompute側の固定座標系のため、
+     * 見た目のサイズはmesh.scaleで画面いっぱいに広げる。
+     */
+    this.mesh.scale.set(
+      (visibleWidth / WATER_BOUNDS_X) * OVERSCAN,
+      (visibleHeight / WATER_BOUNDS_Y) * OVERSCAN,
+      1,
+    );
+
+    this.compute.mouseSize.value = this.isPointerDown
       ? this.params.mouseSizeClick
       : this.params.mouseSizeHover;
-    this.compute.mouseDeep.value = isMouseDown
+    this.compute.mouseDeep.value = this.isPointerDown
       ? this.params.mouseDeepClick
       : this.params.mouseDeepHover;
 
@@ -123,6 +196,12 @@ export class Water {
   }
 
   public registerGUI(folder: any): void {
+    folder
+      .addColor(this.params, "color")
+      .name("Color")
+      .onChange((value: string) => {
+        this.material.color.set(value);
+      });
     folder
       .add(this.params, "opacity", 0.3, 1.0, 0.05)
       .name("Opacity")
