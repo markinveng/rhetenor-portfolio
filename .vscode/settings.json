@@ -17,10 +17,12 @@
     "raycaster",
     "rhetenor",
     "Sato",
+    "Tweens",
     "uvtbdxa",
     "vercel",
     "webgpu",
-    "workerd"
+    "workerd",
+    "worklist"
   ],
   "terminal.integrated.enableFileLinks": "off"
 }

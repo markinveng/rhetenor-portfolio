@@ -1,9 +1,17 @@
 // scripts/migrateVideoMedia.ts
 //
-// mediaItemに新設した `video` タイプ(直接動画URL)への移行スクリプト。
-// 過去に type: 'vimeo' の vimeoUrl フィールドへ、本物のVimeo URLではない
-// 動画ファイルの直URL(Cloudflare R2など)を誤って入れてしまったドキュメントを
-// type: 'video' / videoUrl に付け替える。
+// mediaItemを "cloudflareVideo" タイプ(cloudflareVideoUrlフィールド)に
+// 統一するための移行スクリプト。
+//
+// 対象:
+// - type: 'video' / videoUrl (以前の直接URL用タイプ。廃止し cloudflareVideo に統合)
+// - type: 'vimeo' / vimeoUrl で、実際のvimeo.com URLではないもの
+//   (Cloudflare R2などの直URLを誤ってvimeoUrlに入れてしまった過去データ)
+//
+// 実際のvimeo.com URLが入っている type: 'vimeo' のドキュメントは
+// 対応する動画ファイルが無いため自動移行できない。見つかった場合は
+// コンソールに警告を出すのみで、データはそのまま残す(手動でCloudflare動画に
+// 差し替えてください)。
 //
 // 実行前に必ずデータセットのバックアップ(sanity dataset export)を取ること。
 
@@ -18,18 +26,34 @@ const VIMEO_URL_PATTERN = /vimeo\.com\/(?:video\/)?\d+/
 interface MediaItemLike {
   type?: string
   vimeoUrl?: string
+  videoUrl?: string
 }
 
 function isRealVimeoUrl(url: string | undefined): boolean {
   return !!url && VIMEO_URL_PATTERN.test(url)
 }
 
-function needsMigration(media: MediaItemLike | undefined | null): boolean {
+function getMigratableUrl(media: MediaItemLike | undefined | null): string | null {
+  if (!media) {
+    return null
+  }
+
+  if (media.type === 'video' && media.videoUrl) {
+    return media.videoUrl
+  }
+
+  if (media.type === 'vimeo' && media.vimeoUrl && !isRealVimeoUrl(media.vimeoUrl)) {
+    return media.vimeoUrl
+  }
+
+  return null
+}
+
+function isUnmigratableVimeo(media: MediaItemLike | undefined | null): boolean {
   return (
     !!media &&
     media.type === 'vimeo' &&
-    !!media.vimeoUrl &&
-    !isRealVimeoUrl(media.vimeoUrl)
+    isRealVimeoUrl(media.vimeoUrl)
   )
 }
 
@@ -51,21 +75,30 @@ async function migrateVideoMedia() {
   const transaction = client.transaction()
   let patchedDocs = 0
   let patchedFields = 0
+  const unmigratable: string[] = []
 
   portfolios.forEach((portfolio) => {
     const patch: Record<string, unknown> = {}
 
-    if (needsMigration(portfolio.thumbnailMedia)) {
-      patch['thumbnailMedia.type'] = 'video'
-      patch['thumbnailMedia.videoUrl'] = portfolio.thumbnailMedia!.vimeoUrl
+    const thumbnailUrl = getMigratableUrl(portfolio.thumbnailMedia)
+
+    if (thumbnailUrl) {
+      patch['thumbnailMedia.type'] = 'cloudflareVideo'
+      patch['thumbnailMedia.cloudflareVideoUrl'] = thumbnailUrl
       patchedFields += 1
+    } else if (isUnmigratableVimeo(portfolio.thumbnailMedia)) {
+      unmigratable.push(`${portfolio._id} / thumbnailMedia`)
     }
 
     portfolio.previewMedia?.forEach((media, index) => {
-      if (needsMigration(media)) {
-        patch[`previewMedia[${index}].type`] = 'video'
-        patch[`previewMedia[${index}].videoUrl`] = media.vimeoUrl
+      const url = getMigratableUrl(media)
+
+      if (url) {
+        patch[`previewMedia[${index}].type`] = 'cloudflareVideo'
+        patch[`previewMedia[${index}].cloudflareVideoUrl`] = url
         patchedFields += 1
+      } else if (isUnmigratableVimeo(media)) {
+        unmigratable.push(`${portfolio._id} / previewMedia[${index}]`)
       }
     })
 
@@ -75,16 +108,22 @@ async function migrateVideoMedia() {
     }
   })
 
-  if (patchedDocs === 0) {
+  if (patchedDocs > 0) {
+    await transaction.commit()
+
+    console.log(
+      `✅ ${patchedDocs}件のドキュメント(${patchedFields}箇所のメディア)を type: 'cloudflareVideo' へ移行しました`,
+    )
+  } else {
     console.log('✅ 移行対象のドキュメントはありませんでした')
-    return
   }
 
-  await transaction.commit()
-
-  console.log(
-    `✅ ${patchedDocs}件のドキュメント(${patchedFields}箇所のメディア)を type: 'video' へ移行しました`,
-  )
+  if (unmigratable.length > 0) {
+    console.warn(
+      `⚠️ 本物のVimeo URLのため自動移行できなかった箇所が${unmigratable.length}件あります。Cloudflareにアップロードした動画に手動で差し替えてください:`,
+    )
+    unmigratable.forEach((entry) => console.warn(`  - ${entry}`))
+  }
 }
 
 migrateVideoMedia().catch((error) => {

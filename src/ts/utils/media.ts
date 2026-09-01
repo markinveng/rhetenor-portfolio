@@ -1,40 +1,16 @@
 import * as THREE from "three/webgpu";
-import { getVimeoId } from "./vimeo";
 import type { MediaItem } from "../../types/portfolio";
 
-export type PlayableMediaKind = "image" | "video" | "vimeo-embed";
+export type PlayableMediaKind = "image" | "video";
 
-/**
- * mediaItemの種別を判定する。
- * "vimeo"タイプでも、vimeoUrlが実際のvimeo.com URLでない場合
- * (R2などの直接動画URLが入っている過去データ)は "video" として扱う。
- */
+/** mediaItemの種別を判定する。 */
 export function resolvePlayableKind(media: MediaItem): PlayableMediaKind {
-  if (media.type === "img") {
-    return "image";
-  }
-
-  if (media.type === "video") {
-    return "video";
-  }
-
-  return getVimeoId(media.vimeoUrl) ? "vimeo-embed" : "video";
+  return media.type === "img" ? "image" : "video";
 }
 
-/**
- * "video"として扱うmediaItemから再生対象のURLを取り出す。
- * 新スキーマ(videoUrl)・旧データ(vimeoUrlの流用)の両方に対応する。
- */
+/** "cloudflareVideo"のmediaItemから再生対象のURLを取り出す。 */
 export function getDirectVideoUrl(media: MediaItem): string | null {
-  if (media.type === "video") {
-    return media.videoUrl;
-  }
-
-  if (media.type === "vimeo" && !getVimeoId(media.vimeoUrl)) {
-    return media.vimeoUrl;
-  }
-
-  return null;
+  return media.type === "cloudflareVideo" ? media.cloudflareVideoUrl : null;
 }
 
 export interface VideoTextureHandle {

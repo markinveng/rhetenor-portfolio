@@ -33,28 +33,18 @@ export interface ImageMedia {
   alt?: string;
 }
 
-export interface VimeoMedia {
+export interface CloudflareVideoMedia {
   _type: 'mediaItem';
   _key?: string;
 
-  type: 'vimeo';
+  type: 'cloudflareVideo';
 
-  vimeoUrl: string;
-}
-
-export interface VideoMedia {
-  _type: 'mediaItem';
-  _key?: string;
-
-  type: 'video';
-
-  videoUrl: string;
+  cloudflareVideoUrl: string;
 }
 
 export type MediaItem =
   | ImageMedia
-  | VimeoMedia
-  | VideoMedia;
+  | CloudflareVideoMedia;
 
 /**
  * Related Link

@@ -9,7 +9,6 @@ import * as THREE from "three/webgpu";
 
 import { getOrCreateWorld, type WorldContext } from "../index";
 import { PortfolioApi, urlFor } from "../../Sanity";
-import { fetchVimeoInfo, getVimeoId } from "../../utils/vimeo";
 import { createVideoTexture, type VideoTextureHandle } from "../../utils/media";
 import {
   createHoverInvertMaterial,
@@ -39,14 +38,12 @@ interface OpenEventDetail {
   imageUrl: string | null;
 }
 
-type SlideKind = "image" | "video" | "vimeo-embed";
+type SlideKind = "image" | "video";
 
 interface SlideSource {
   kind: SlideKind;
-  /** image: Sanity画像URL, video: 直接再生できる動画URL, vimeo-embed: null */
-  url: string | null;
-  /** vimeo-embedのみ使用 */
-  embedUrl?: string;
+  /** image: Sanity画像URL, video: Cloudflareにホストした動画の直接URL */
+  url: string;
   /** レール・クロスフェード用のポスター画像(video種別には無い) */
   posterUrl: string | null;
   aspectRatio: number;
@@ -56,7 +53,7 @@ interface SlideEntry {
   kind: SlideKind;
   /** THREE.Mesh/THREE.Texture(three/webgpuには@types/threeのサブパス型定義が無いためany)。 */
   mesh: any;
-  hover: HoverInvertMaterialHandle | null;
+  hover: HoverInvertMaterialHandle;
   videoHandle: VideoTextureHandle | null;
   texture: any;
   aspectRatio: number;
@@ -66,45 +63,18 @@ interface SlideEntry {
 
 /**
  * mediaItemから、Plane描画に必要な種別・URL・アスペクト比を解決する。
- * "vimeo"タイプでも実際のvimeo.com URLでない場合(過去データ)は
- * 直接動画URLとして扱う。
  */
-async function resolveSlideSource(media: MediaItem): Promise<SlideSource> {
+function resolveSlideSource(media: MediaItem): SlideSource {
   if (media.type === "img") {
     const url = urlFor(media.image).width(1400).url();
     return { kind: "image", url, posterUrl: url, aspectRatio: 16 / 9 };
   }
 
-  if (media.type === "video") {
-    return {
-      kind: "video",
-      url: media.videoUrl,
-      posterUrl: null,
-      aspectRatio: 16 / 9,
-    };
-  }
-
-  if (!getVimeoId(media.vimeoUrl)) {
-    return {
-      kind: "video",
-      url: media.vimeoUrl,
-      posterUrl: null,
-      aspectRatio: 16 / 9,
-    };
-  }
-
-  const info = await fetchVimeoInfo(media.vimeoUrl);
-
-  if (!info) {
-    return { kind: "vimeo-embed", url: null, posterUrl: null, aspectRatio: 16 / 9 };
-  }
-
   return {
-    kind: "vimeo-embed",
-    url: null,
-    embedUrl: info.embedUrl,
-    posterUrl: info.posterUrl,
-    aspectRatio: info.aspectRatio,
+    kind: "video",
+    url: media.cloudflareVideoUrl,
+    posterUrl: null,
+    aspectRatio: 16 / 9,
   };
 }
 
@@ -136,7 +106,6 @@ export class WorkDetail {
   private readonly titleEl: HTMLElement;
   private readonly closeEl: HTMLElement;
   private readonly closeZoneEl: HTMLElement;
-  private readonly vimeoFrameEl: HTMLIFrameElement;
 
   private heroEl: HTMLElement | null = null;
   private railItemEls: HTMLElement[] = [];
@@ -186,17 +155,6 @@ export class WorkDetail {
     this.titleEl = this.requireEl("[data-work-detail-title]");
     this.closeEl = this.requireEl("[data-work-detail-close]");
     this.closeZoneEl = this.requireEl("[data-work-detail-close-zone]");
-
-    /*
-     * 本物のVimeo URLはクロスオリジンiframeの中身をテクスチャに焼き込めないため
-     * (ブラウザのセキュリティ制約)、この1種別だけはPlaneではなくDOM iframeのまま
-     * パネル領域いっぱいに重ねる。表示中のスライドがvimeo-embedの間だけ表示する。
-     */
-    this.vimeoFrameEl = document.createElement("iframe");
-    this.vimeoFrameEl.className = "work-detail__vimeo-frame";
-    this.vimeoFrameEl.allow = "autoplay; fullscreen";
-    this.vimeoFrameEl.setAttribute("loading", "lazy");
-    this.scrollEl.appendChild(this.vimeoFrameEl);
   }
 
   private requireEl(selector: string): HTMLElement {
@@ -362,9 +320,7 @@ export class WorkDetail {
       ...(portfolio.previewMedia ?? []),
     ];
 
-    this.slideSources = await Promise.all(
-      mediaList.map((media) => resolveSlideSource(media)),
-    );
+    this.slideSources = mediaList.map((media) => resolveSlideSource(media));
 
     this.mediaCount = mediaList.length;
     this.hasLoop = this.mediaCount > 1;
@@ -377,19 +333,13 @@ export class WorkDetail {
     this.buildSlideEntries();
     this.buildRail(title);
     this.updateSlidePositions();
-    this.updateVimeoFrame();
 
     /*
      * hero(FLIP用の仮要素)から、Plane側へ見た目そのままバトンタッチする。
      */
     this.slideEntries.forEach((entry) => {
-      entry.hover?.setOpacity(0, false);
-      entry.hover?.setOpacity(1);
-
-      if (!entry.hover) {
-        const material = entry.mesh.material as any;
-        gsap.fromTo(material, { opacity: 0 }, { opacity: 1, duration: 0.4 });
-      }
+      entry.hover.setOpacity(0, false);
+      entry.hover.setOpacity(1);
     });
 
     window.setTimeout(() => {
@@ -448,21 +398,27 @@ export class WorkDetail {
   }
 
   /**
-   * 各メディアに対応するPlaneを作る。
-   * image/video(直接URL) は実テクスチャを焼き込んだPlane、
-   * 本物のVimeoは中身の無いプレースホルダーPlane(背景色のみ、
-   * アクティブ時にDOM iframeを重ねて表示)にする。
+   * 各メディアに対応するPlaneを作る。image/video(Cloudflare動画URL)
+   * どちらも実テクスチャを焼き込んだPlaneとして描画する。
    */
   private buildSlideEntries(): void {
     this.disposeSlideEntries();
 
     this.slideEntries = this.slideSources.map((source) => {
-      let texture: any = null;
+      let texture: any;
       let videoHandle: VideoTextureHandle | null = null;
-      let hover: HoverInvertMaterialHandle | null = null;
-      let material: any;
 
-      if (source.kind === "image" && source.url) {
+      if (source.kind === "video") {
+        videoHandle = createVideoTexture(source.url);
+        texture = videoHandle.texture;
+
+        videoHandle.ready.then(({ width, height }) => {
+          if (width > 0 && height > 0) {
+            source.aspectRatio = width / height;
+            this.updateSlidePositions();
+          }
+        });
+      } else {
         const loadedTexture = new THREE.TextureLoader().load(
           source.url,
           (loaded: any) => {
@@ -477,31 +433,10 @@ export class WorkDetail {
         );
         loadedTexture.colorSpace = THREE.SRGBColorSpace;
         texture = loadedTexture;
-
-        hover = createHoverInvertMaterial(loadedTexture);
-        material = hover.material;
-      } else if (source.kind === "video" && source.url) {
-        videoHandle = createVideoTexture(source.url);
-        texture = videoHandle.texture;
-
-        hover = createHoverInvertMaterial(videoHandle.texture);
-        material = hover.material;
-
-        videoHandle.ready.then(({ width, height }) => {
-          if (width > 0 && height > 0) {
-            source.aspectRatio = width / height;
-            this.updateSlidePositions();
-          }
-        });
-      } else {
-        material = new THREE.MeshBasicMaterial({
-          color: 0x1a1a1a,
-          transparent: true,
-          opacity: 0,
-        });
       }
 
-      const mesh = new THREE.Mesh(this.sharedGeometry, material);
+      const hover = createHoverInvertMaterial(texture);
+      const mesh = new THREE.Mesh(this.sharedGeometry, hover.material);
       this.slideGroup.add(mesh);
 
       const entry: SlideEntry = {
@@ -576,30 +511,6 @@ export class WorkDetail {
     this.railItemEls.forEach((railItem, railIndex) => {
       railItem.classList.toggle("is-active", railIndex === nearestIndex);
     });
-
-    this.updateVimeoFrame();
-  }
-
-  /**
-   * アクティブなスライドが本物のVimeoのときだけ、
-   * パネル領域いっぱいにiframeを表示する。
-   */
-  private updateVimeoFrame(): void {
-    const source = this.slideSources[this.activeRealIndex];
-
-    if (!source || source.kind !== "vimeo-embed" || !source.embedUrl) {
-      this.vimeoFrameEl.style.visibility = "hidden";
-      this.vimeoFrameEl.style.opacity = "0";
-      this.vimeoFrameEl.removeAttribute("src");
-      return;
-    }
-
-    if (this.vimeoFrameEl.src !== source.embedUrl) {
-      this.vimeoFrameEl.src = source.embedUrl;
-    }
-
-    this.vimeoFrameEl.style.visibility = "visible";
-    this.vimeoFrameEl.style.opacity = "1";
   }
 
   /**
@@ -861,15 +772,7 @@ export class WorkDetail {
 
     document.body.appendChild(hero);
 
-    this.slideEntries.forEach((entry) => {
-      if (entry.hover) {
-        entry.hover.setOpacity(0);
-      } else {
-        gsap.to(entry.mesh.material, { opacity: 0, duration: 0.4, overwrite: true });
-      }
-    });
-
-    this.vimeoFrameEl.style.opacity = "0";
+    this.slideEntries.forEach((entry) => entry.hover.setOpacity(0));
 
     const timeline = gsap.timeline({
       onComplete: () => {
@@ -925,18 +828,13 @@ export class WorkDetail {
 
   private disposeSlideEntries(): void {
     this.slideEntries.forEach((entry) => {
-      entry.hover?.dispose();
+      entry.hover.dispose();
 
       if (entry.videoHandle) {
         /* videoHandle.dispose()がtexture.disposeも兼ねる */
         entry.videoHandle.dispose();
       } else {
         entry.texture?.dispose();
-      }
-
-      if (!entry.hover) {
-        gsap.killTweensOf(entry.mesh.material);
-        (entry.mesh.material as any).dispose();
       }
 
       this.slideGroup.remove(entry.mesh);
@@ -961,10 +859,6 @@ export class WorkDetail {
     this.hoveredEntry?.hover?.setActive(false);
     this.hoveredEntry = null;
     this.cursor?.leave();
-
-    this.vimeoFrameEl.style.visibility = "hidden";
-    this.vimeoFrameEl.style.opacity = "0";
-    this.vimeoFrameEl.removeAttribute("src");
 
     this.heroEl?.remove();
     this.heroEl = null;
@@ -1026,7 +920,6 @@ export class WorkDetail {
 
     this.world?.scene.remove(this.slideGroup);
 
-    this.vimeoFrameEl.remove();
     this.heroEl?.remove();
   }
 }

@@ -52,7 +52,7 @@ export const portfolioType = defineType({
       type: 'mediaItem',
 
       description:
-        '画像またはVimeo動画のどちらかを選択してください',
+        '画像または動画のどちらかを選択してください',
 
       validation: (Rule) =>
         Rule.required(),

@@ -21,12 +21,8 @@ export const mediaItemType = defineType({
             value: 'img',
           },
           {
-            title: 'Vimeo動画',
-            value: 'vimeo',
-          },
-          {
-            title: '動画(直接URL)',
-            value: 'video',
+            title: '動画',
+            value: 'cloudflareVideo',
           },
         ],
         layout: 'radio',
@@ -59,16 +55,7 @@ export const mediaItemType = defineType({
     }),
 
     defineField({
-      name: 'vimeoUrl',
-      title: 'Vimeo URL',
-      type: 'url',
-
-      hidden: ({ parent }) =>
-        parent?.type !== 'vimeo',
-    }),
-
-    defineField({
-      name: 'videoUrl',
+      name: 'cloudflareVideoUrl',
       title: '動画URL(mp4など、直接再生できるファイルのURL)',
       type: 'url',
 
@@ -76,7 +63,7 @@ export const mediaItemType = defineType({
         'Cloudflare R2などにアップロードした動画ファイルの公開URL',
 
       hidden: ({ parent }) =>
-        parent?.type !== 'video',
+        parent?.type !== 'cloudflareVideo',
     }),
   ],
 
@@ -94,15 +81,8 @@ export const mediaItemType = defineType({
       }
 
       if (
-        value.type === 'vimeo' &&
-        !value.vimeoUrl
-      ) {
-        return 'Vimeo URLを入力してください'
-      }
-
-      if (
-        value.type === 'video' &&
-        !value.videoUrl
+        value.type === 'cloudflareVideo' &&
+        !value.cloudflareVideoUrl
       ) {
         return '動画URLを入力してください'
       }
@@ -114,15 +94,13 @@ export const mediaItemType = defineType({
     select: {
       type: 'type',
       image: 'image',
-      vimeoUrl: 'vimeoUrl',
-      videoUrl: 'videoUrl',
+      cloudflareVideoUrl: 'cloudflareVideoUrl',
     },
 
     prepare({
       type,
       image,
-      vimeoUrl,
-      videoUrl,
+      cloudflareVideoUrl,
     }) {
       if (type === 'img') {
         return {
@@ -131,16 +109,9 @@ export const mediaItemType = defineType({
         }
       }
 
-      if (type === 'video') {
-        return {
-          title: '動画(直接URL)',
-          subtitle: videoUrl,
-        }
-      }
-
       return {
-        title: 'Vimeo動画',
-        subtitle: vimeoUrl,
+        title: '動画',
+        subtitle: cloudflareVideoUrl,
       }
     },
   },

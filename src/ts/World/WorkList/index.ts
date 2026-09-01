@@ -8,7 +8,6 @@ import { InertiaPlugin } from "gsap/InertiaPlugin";
 
 import { getOrCreateWorld, type WorldContext } from "../index";
 import { urlFor } from "../../Sanity";
-import { fetchVimeoInfo, getVimeoId } from "../../utils/vimeo";
 import { createVideoTexture, type VideoTextureHandle } from "../../utils/media";
 import { HoverInvertCursor } from "../../utils/HoverInvertCursor";
 import type { PortfolioSummary } from "../../../types/portfolio";
@@ -147,31 +146,20 @@ export class WorkList {
   }
 
   /**
-   * SanityのCDN画像・Vimeoのサムネイル画像・直接動画URLをテクスチャとして読み込む。
-   * "vimeo"タイプでも実際のvimeo.com URLでない場合(過去データ)は
-   * 直接動画URLとして扱う。
+   * SanityのCDN画像、またはCloudflareにホストした動画をテクスチャとして読み込む。
    */
-  private async loadMedia(entry: PlaneEntry): Promise<void> {
+  private loadMedia(entry: PlaneEntry): void {
     const media = entry.portfolio.thumbnailMedia;
 
-    if (media.type === "video" || (media.type === "vimeo" && !getVimeoId(media.vimeoUrl))) {
-      const videoUrl = media.type === "video" ? media.videoUrl : media.vimeoUrl;
-
-      entry.videoHandle = createVideoTexture(videoUrl);
+    if (media.type === "cloudflareVideo") {
+      entry.videoHandle = createVideoTexture(media.cloudflareVideoUrl);
       entry.material.map = entry.videoHandle.texture;
       entry.material.color.set(0xffffff);
       entry.material.needsUpdate = true;
       return;
     }
 
-    const url =
-      media.type === "img"
-        ? urlFor(media.image).width(600).url()
-        : ((await fetchVimeoInfo(media.vimeoUrl))?.posterUrl ?? null);
-
-    if (!url) {
-      return;
-    }
+    const url = urlFor(media.image).width(600).url();
 
     this.textureLoader.load(url, (texture: any) => {
       texture.colorSpace = THREE.SRGBColorSpace;

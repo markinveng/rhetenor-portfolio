@@ -25,8 +25,7 @@ export class PortfolioQuery {
           image,
           alt,
 
-          vimeoUrl,
-          videoUrl
+          cloudflareVideoUrl
         },
 
         modalDescription,
@@ -62,8 +61,7 @@ export class PortfolioQuery {
           image,
           alt,
 
-          vimeoUrl,
-          videoUrl
+          cloudflareVideoUrl
         },
 
         previewMedia[] {
@@ -75,8 +73,7 @@ export class PortfolioQuery {
           image,
           alt,
 
-          vimeoUrl,
-          videoUrl
+          cloudflareVideoUrl
         },
 
         relatedLinks[] {

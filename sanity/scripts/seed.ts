@@ -77,13 +77,13 @@ async function seed() {
         Math.min(i, 28),
       ).padStart(2, '0')}`,
 
-      // サムネイルは画像/Vimeo動画をランダムで割り当てる
+      // サムネイルは画像/動画をランダムで割り当てる
       thumbnailMedia:
         Math.random() < 0.3
           ? {
             _type: 'mediaItem',
-            type: 'video',
-            videoUrl: 'https://pub-5f1b1ff8ec354c9e9343d8b70a84e334.r2.dev/mov_hts-samp005.mp4',
+            type: 'cloudflareVideo',
+            cloudflareVideoUrl: 'https://pub-5f1b1ff8ec354c9e9343d8b70a84e334.r2.dev/mov_hts-samp005.mp4',
           }
           : {
             _type: 'mediaItem',
@@ -92,19 +92,13 @@ async function seed() {
             alt: `Sample Project ${number}`,
           },
 
-      // サムネイルクリック後のメディア一覧(先頭はVimeo動画、2番目は直接動画URL)
+      // サムネイルクリック後のメディア一覧(先頭は動画)
       previewMedia: [
         {
           _type: 'mediaItem',
-          _key: `preview-${i}-vimeo`,
-          type: 'vimeo',
-          vimeoUrl: 'https://vimeo.com/1094266104',
-        },
-        {
-          _type: 'mediaItem',
-          _key: `preview-${i}-video`,
-          type: 'video',
-          videoUrl: 'https://pub-5f1b1ff8ec354c9e9343d8b70a84e334.r2.dev/mov_hts-samp005.mp4',
+          _key: `preview-${i}-cloudflare`,
+          type: 'cloudflareVideo',
+          cloudflareVideoUrl: 'https://pub-5f1b1ff8ec354c9e9343d8b70a84e334.r2.dev/mov_hts-samp005.mp4',
         },
         {
           _type: 'mediaItem',

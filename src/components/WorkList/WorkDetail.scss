@@ -155,29 +155,6 @@ $rail-width: 96px;
     touch-action: none;
   }
 
-  &__vimeo-frame {
-    position: absolute;
-    inset: 0;
-
-    width: 100%;
-    height: 100%;
-
-    border: 0;
-
-    background-color: #1a1a1a;
-
-    /*
-     * background=1のVimeo埋め込みは操作UIを持たないため、
-     * ホイール/タッチ入力をiframeに奪われないよう無効化する。
-     */
-    pointer-events: none;
-
-    visibility: hidden;
-    opacity: 0;
-
-    transition: opacity 0.3s ease;
-  }
-
   &__hero {
     position: fixed;
     z-index: 21;
