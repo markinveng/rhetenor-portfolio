@@ -24,6 +24,12 @@ const portfolioApi = new PortfolioApi();
 const RAIL_WIDTH = 96;
 const SLIDE_TRANSITION_DURATION = 0.7;
 
+/**
+ * 選択中の作品Planeの傾き(ラジアン)。右奥・左手前になる向き。
+ * 数値は微調整しやすいよう独立した定数にしている。
+ */
+const SLIDE_TILT_Y = THREE.MathUtils.degToRad(8);
+
 interface ScreenRect {
   top: number;
   left: number;
@@ -223,6 +229,8 @@ export class WorkDetail {
     this.root.setAttribute("aria-hidden", "false");
     document.body.classList.add("has-open-work-detail");
 
+    this.showBackdrop();
+
     const animationDone = this.animateHeroIn(rect, imageUrl);
     const portfolio = await this.fetchPortfolio(slug);
 
@@ -275,8 +283,17 @@ export class WorkDetail {
     document.body.appendChild(hero);
     this.heroEl = hero;
 
-    const targetWidth = window.innerWidth / 2 - RAIL_WIDTH;
-    const targetHeight = window.innerHeight;
+    /*
+     * 幅・高さをパネル最大サイズへ単純に伸ばすと縦横比が崩れて縦長に見えてしまうため、
+     * 元のPlaneと同じ縦横比を保ったまま収まる最大サイズ(containFit)へ成長させる。
+     */
+    const boxWidth = window.innerWidth / 2 - RAIL_WIDTH;
+    const boxHeight = window.innerHeight;
+    const aspectRatio = rect.width / rect.height;
+    const fit = containFit(aspectRatio, boxWidth, boxHeight);
+
+    const targetTop = (boxHeight - fit.height) / 2;
+    const targetLeft = RAIL_WIDTH + (boxWidth - fit.width) / 2;
 
     return new Promise((resolve) => {
       let settled = false;
@@ -291,10 +308,10 @@ export class WorkDetail {
       };
 
       gsap.to(hero, {
-        top: 0,
-        left: RAIL_WIDTH,
-        width: targetWidth,
-        height: targetHeight,
+        top: targetTop,
+        left: targetLeft,
+        width: fit.width,
+        height: fit.height,
         duration: 0.9,
         ease: "power3.inOut",
         onComplete: finish,
@@ -306,6 +323,23 @@ export class WorkDetail {
        */
       window.setTimeout(finish, 1500);
     });
+  }
+
+  /**
+   * 選択した作品に注目させるため、背景(Water/WorkListのグリッド)側全体を
+   * ぼかす。実際のボカし(GSAP)はWorkList側が担当するため、
+   * ここではイベントで状態を伝えるだけにする。
+   */
+  private showBackdrop(): void {
+    document.dispatchEvent(
+      new CustomEvent("workdetail:blur", { detail: { active: true } }),
+    );
+  }
+
+  private hideBackdrop(): void {
+    document.dispatchEvent(
+      new CustomEvent("workdetail:blur", { detail: { active: false } }),
+    );
   }
 
   /**
@@ -443,6 +477,12 @@ export class WorkDetail {
        * 選択中の作品が背景に埋もれないようにする。
        */
       mesh.renderOrder = 2;
+
+      /*
+       * 右奥・左手前になるよう軽くY軸回転させ、平面的に見えないようにする。
+       */
+      mesh.rotation.y = SLIDE_TILT_Y;
+
       this.slideGroup.add(mesh);
 
       const entry: SlideEntry = {
@@ -728,6 +768,8 @@ export class WorkDetail {
     gsap.set([this.panelEl, this.closeEl], { autoAlpha: 0 });
     document.body.classList.remove("has-open-work-detail");
 
+    this.hideBackdrop();
+
     if (!originRect) {
       this.resetState();
       return;
@@ -767,10 +809,22 @@ export class WorkDetail {
       hero.appendChild(targetLayer);
     }
 
-    hero.style.top = "0px";
-    hero.style.left = `${RAIL_WIDTH}px`;
-    hero.style.width = `${window.innerWidth / 2 - RAIL_WIDTH}px`;
-    hero.style.height = `${window.innerHeight}px`;
+    /*
+     * 縦横比を保ったまま縮小させるため、開始位置も実際のPlaneと同じ
+     * containFitの矩形に合わせる(フルパネル矩形のままだと縦長に歪む)。
+     */
+    const boxWidth = window.innerWidth / 2 - RAIL_WIDTH;
+    const boxHeight = window.innerHeight;
+    const startFit = containFit(
+      activeSource?.aspectRatio ?? 16 / 9,
+      boxWidth,
+      boxHeight,
+    );
+
+    hero.style.top = `${(boxHeight - startFit.height) / 2}px`;
+    hero.style.left = `${RAIL_WIDTH + (boxWidth - startFit.width) / 2}px`;
+    hero.style.width = `${startFit.width}px`;
+    hero.style.height = `${startFit.height}px`;
 
     document.body.appendChild(hero);
 
@@ -814,6 +868,8 @@ export class WorkDetail {
    */
   private failAndReset(): void {
     document.body.classList.remove("has-open-work-detail");
+
+    this.hideBackdrop();
 
     if (this.heroEl) {
       gsap.to(this.heroEl, {
@@ -872,6 +928,8 @@ export class WorkDetail {
       [this.railEl, this.titleEl, this.closeEl],
       { autoAlpha: 0 },
     );
+
+    this.hideBackdrop();
 
     this.railEl.style.visibility = "hidden";
     this.titleEl.style.visibility = "hidden";

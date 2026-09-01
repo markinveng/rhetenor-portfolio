@@ -1,4 +1,5 @@
 import * as THREE from "three/webgpu";
+import { uniform } from "three/tsl";
 import gsap from "gsap";
 // gsap の型定義がWindows上で大文字小文字の衝突を起こすため抑制 (see: gsap/types/index.d.ts の draggable.d.ts 参照)
 // @ts-ignore
@@ -9,6 +10,7 @@ import { InertiaPlugin } from "gsap/InertiaPlugin";
 import { getOrCreateWorld, type WorldContext } from "../index";
 import { urlFor } from "../../Sanity";
 import { createVideoTexture, type VideoTextureHandle } from "../../utils/media";
+import { createBackgroundBlurMaterial } from "../../materials/createBackgroundBlurMaterial";
 import { getOrCreateCursor, type CursorController } from "../../Cursor";
 import type { PortfolioSummary } from "../../../types/portfolio";
 
@@ -29,6 +31,11 @@ const ASPECT_RATIO = 300 / 169;
 
 /** Water背景がうっすら透けて見えるよう、Planeは完全な不透明にはしない。 */
 const REST_OPACITY = 0.9;
+
+/** 作品詳細を開いている間の背景ボカシ。数値は微調整しやすいよう独立させている。 */
+const BACKGROUND_BLUR_FADE_IN_DURATION = 0.7;
+const BACKGROUND_BLUR_FADE_OUT_DURATION = 0.5;
+const BACKGROUND_BLUR_EASE = "power2.out";
 
 interface PlaneEntry {
   portfolio: PortfolioSummary;
@@ -82,6 +89,9 @@ export class WorkList {
 
   private cursor: CursorController | null = null;
 
+  /** 作品詳細を開いている間、背景全体をぼかすための共有uniform(0〜1)。 */
+  private readonly backgroundBlur = uniform(0);
+
   private resizeObserver: ResizeObserver | null = null;
   private resizeFrame: number | null = null;
 
@@ -132,22 +142,23 @@ export class WorkList {
       "portfolio:setVisible",
       this.handleSetVisible as EventListener,
     );
+
+    document.addEventListener(
+      "workdetail:blur",
+      this.handleBlurToggle as EventListener,
+    );
   }
 
   /**
    * PlaneGeometryはすべて1x1の単位サイズで作り、実サイズはmesh.scaleで表現する。
+   * テクスチャはTextureLoader.load()の戻り値(画像ロード前でも同一インスタンス)を
+   * そのままcolorNodeへ渡すため、マテリアルはテクスチャ確定後に生成する。
    */
   private buildPlanes(): void {
     this.entries = this.portfolios.map((portfolio) => {
-      const material = new THREE.MeshBasicMaterial({
-        color: 0x1a1a1a,
-        transparent: true,
-        opacity: REST_OPACITY,
-        /*
-         * Waterとz付近で重なるため、深度バッファの取り合いで隐れないようにする。
-         */
-        depthWrite: false,
-      });
+      const { material, videoHandle } = this.createEntryMaterial(
+        portfolio.thumbnailMedia,
+      );
 
       const mesh = new THREE.Mesh(this.sharedGeometry, material);
 
@@ -163,37 +174,46 @@ export class WorkList {
         mesh,
         material,
         baseScale: { x: 1, y: 1 },
-        videoHandle: null,
+        videoHandle,
       };
-
-      this.loadMedia(entry);
 
       return entry;
     });
   }
 
   /**
-   * SanityのCDN画像、またはCloudflareにホストした動画をテクスチャとして読み込む。
+   * SanityのCDN画像、またはCloudflareにホストした動画をテクスチャとして読み込み、
+   * ぼかしシェーダー付きマテリアルを作る。
    */
-  private loadMedia(entry: PlaneEntry): void {
-    const media = entry.portfolio.thumbnailMedia;
-
+  private createEntryMaterial(
+    media: PortfolioSummary["thumbnailMedia"],
+  ): { material: any; videoHandle: VideoTextureHandle | null } {
     if (media.type === "cloudflareVideo") {
-      entry.videoHandle = createVideoTexture(media.cloudflareVideoUrl);
-      entry.material.map = entry.videoHandle.texture;
-      entry.material.color.set(0xffffff);
-      entry.material.needsUpdate = true;
-      return;
+      const videoHandle = createVideoTexture(media.cloudflareVideoUrl);
+      const material = createBackgroundBlurMaterial(
+        videoHandle.texture,
+        this.backgroundBlur,
+      );
+
+      material.color.set(0xffffff);
+      material.opacity = REST_OPACITY;
+
+      return { material, videoHandle };
     }
 
     const url = urlFor(media.image).width(600).url();
 
-    this.textureLoader.load(url, (texture: any) => {
-      texture.colorSpace = THREE.SRGBColorSpace;
-      entry.material.map = texture;
-      entry.material.color.set(0xffffff);
-      entry.material.needsUpdate = true;
+    const texture = this.textureLoader.load(url, (loaded: any) => {
+      loaded.colorSpace = THREE.SRGBColorSpace;
+      material.color.set(0xffffff);
+      material.needsUpdate = true;
     });
+
+    const material = createBackgroundBlurMaterial(texture, this.backgroundBlur);
+    material.color.set(0x1a1a1a);
+    material.opacity = REST_OPACITY;
+
+    return { material, videoHandle: null };
   }
 
   private getBreakpoint(): (typeof COLUMN_BREAKPOINTS)[number] {
@@ -559,6 +579,22 @@ export class WorkList {
     }
   };
 
+  /**
+   * 作品詳細の開閉に合わせ、背景全体(自身のPlane)をボカす/戻す。
+   */
+  private handleBlurToggle = (
+    event: CustomEvent<{ active: boolean }>,
+  ): void => {
+    gsap.to(this.backgroundBlur, {
+      value: event.detail.active ? 1 : 0,
+      duration: event.detail.active
+        ? BACKGROUND_BLUR_FADE_IN_DURATION
+        : BACKGROUND_BLUR_FADE_OUT_DURATION,
+      ease: BACKGROUND_BLUR_EASE,
+      overwrite: true,
+    });
+  };
+
   private initResizeObserver(): void {
     this.resizeObserver = new ResizeObserver(() => {
       if (this.resizeFrame !== null) {
@@ -595,6 +631,11 @@ export class WorkList {
     document.removeEventListener(
       "portfolio:setVisible",
       this.handleSetVisible as EventListener,
+    );
+
+    document.removeEventListener(
+      "workdetail:blur",
+      this.handleBlurToggle as EventListener,
     );
 
     this.cursor = null;

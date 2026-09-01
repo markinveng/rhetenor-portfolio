@@ -26,12 +26,12 @@ export class Water {
   public params: WaterParams = {
     color: "#99e0ff",
     opacity: 0.5,
-    mouseSizeHover: 0.12,
-    mouseDeepHover: 0.5,
-    mouseSizeClick: 0.2,
+    mouseSizeHover: 0.3,
+    mouseDeepHover: 0.55,
+    mouseSizeClick: 0.5,
     mouseDeepClick: 0.8,
     viscosity: 0.96,
-    simSpeed: 5,
+    simSpeed: 6,
   };
 
   private geometry: any;

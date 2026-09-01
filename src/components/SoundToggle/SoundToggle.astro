@@ -1,0 +1,50 @@
+---
+import './SoundToggle.scss';
+---
+
+<button
+  type="button"
+  class="sound-toggle"
+  data-sound-toggle
+  aria-pressed="false"
+  aria-label="サウンドのON/OFF切り替え"
+>
+  <span class="sound-toggle__icon" data-sound-toggle-icon>OFF</span>
+</button>
+
+<script>
+  import { getOrCreateSound } from '../../ts/Sound';
+
+  const sync = (): void => {
+    const button = document.querySelector<HTMLButtonElement>(
+      '[data-sound-toggle]',
+    );
+    const icon = document.querySelector<HTMLElement>(
+      '[data-sound-toggle-icon]',
+    );
+
+    if (!button || !icon) {
+      return;
+    }
+
+    const sound = getOrCreateSound();
+
+    const render = (): void => {
+      const muted = sound.isMuted();
+
+      button.classList.toggle('is-on', !muted);
+      button.setAttribute('aria-pressed', String(!muted));
+      icon.textContent = muted ? 'OFF' : 'ON';
+    };
+
+    button.addEventListener('click', () => {
+      sound.toggle();
+      render();
+    });
+
+    render();
+  };
+
+  // astro:transitions(ClientRouter)でボタンが作り直されるたびに再バインドする。
+  document.addEventListener('astro:page-load', sync);
+</script>

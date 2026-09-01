@@ -36,7 +36,6 @@ export function getOrCreateCursor(): CursorController {
   root.innerHTML =
     '<div class="app-cursor__dot" data-cursor-dot></div>' +
     '<div class="app-cursor__label" data-cursor-label>' +
-    '<span class="app-cursor__swipe">← Swipe</span>' +
     '<span class="app-cursor__label-text" data-cursor-label-text></span>' +
     "</div>";
 
