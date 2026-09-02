@@ -48,13 +48,6 @@ interface PlaneEntry {
   videoHandle: VideoTextureHandle | null;
 }
 
-interface ScreenRect {
-  top: number;
-  left: number;
-  width: number;
-  height: number;
-}
-
 /**
  * 作品一覧をDOMではなくThree.jsのPlaneGeometryで描画するギャラリー。
  * WaterBackgroundと同じCanvas/Sceneに統合される(getOrCreateWorld参照)。
@@ -453,40 +446,6 @@ export class WorkList {
     return this.entries.find((entry) => entry.mesh === hitMesh) ?? null;
   }
 
-  /**
-   * Planeの画面上の投影矩形を計算する。WorkDetail側のFLIPアニメーションの起点に使う。
-   */
-  private worldToScreenRect(entry: PlaneEntry): ScreenRect {
-    const camera = this.world!.cameraController.camera;
-
-    const halfWidth = entry.mesh.scale.x / 2;
-    const halfHeight = entry.mesh.scale.y / 2;
-
-    const worldPos = entry.mesh.getWorldPosition(new THREE.Vector3());
-
-    const toScreen = (offsetX: number, offsetY: number) => {
-      const projected = worldPos
-        .clone()
-        .add(new THREE.Vector3(offsetX, offsetY, 0))
-        .project(camera);
-
-      return {
-        x: (projected.x * 0.5 + 0.5) * window.innerWidth,
-        y: (-projected.y * 0.5 + 0.5) * window.innerHeight,
-      };
-    };
-
-    const topLeft = toScreen(-halfWidth, halfHeight);
-    const bottomRight = toScreen(halfWidth, -halfHeight);
-
-    return {
-      top: topLeft.y,
-      left: topLeft.x,
-      width: bottomRight.x - topLeft.x,
-      height: bottomRight.y - topLeft.y,
-    };
-  }
-
   private handleClick = (event: MouseEvent): void => {
     if (this.suppressClick) {
       return;
@@ -498,24 +457,11 @@ export class WorkList {
       return;
     }
 
-    const rect = this.worldToScreenRect(entry);
-    const texture = entry.material.map as any;
-    /*
-     * VideoTextureの場合、動画フレームはstatic画像のsrcを持たないため、
-     * FLIPアニメーションのヒーロー画像は背景色のみのフォールバックにする。
-     */
-    const imageUrl =
-      texture instanceof THREE.VideoTexture
-        ? null
-        : ((texture?.image as HTMLImageElement | undefined)?.src ?? null);
-
     document.dispatchEvent(
       new CustomEvent("worklist:open", {
         detail: {
           slug: entry.portfolio.slug.current,
           title: entry.portfolio.title,
-          rect,
-          imageUrl,
         },
       }),
     );

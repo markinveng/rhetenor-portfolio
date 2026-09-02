@@ -11,9 +11,9 @@ import { getOrCreateWorld, type WorldContext } from "../index";
 import { PortfolioApi, urlFor } from "../../Sanity";
 import { createVideoTexture, type VideoTextureHandle } from "../../utils/media";
 import {
-  createHoverInvertMaterial,
-  type HoverInvertMaterialHandle,
-} from "../../materials/createHoverInvertMaterial";
+  createDetailSlideMaterial,
+  type DetailSlideMaterialHandle,
+} from "../../materials/createDetailSlideMaterial";
 import { getOrCreateCursor, type CursorController } from "../../Cursor";
 import type { MediaItem, Portfolio } from "../../../types/portfolio";
 
@@ -21,27 +21,24 @@ gsap.registerPlugin(Observer);
 
 const portfolioApi = new PortfolioApi();
 
-const RAIL_WIDTH = 96;
-const SLIDE_TRANSITION_DURATION = 0.7;
-
 /**
  * 選択中の作品Planeの傾き(ラジアン)。右奥・左手前になる向き。
  * 数値は微調整しやすいよう独立した定数にしている。
  */
 const SLIDE_TILT_Y = THREE.MathUtils.degToRad(8);
 
-interface ScreenRect {
-  top: number;
-  left: number;
-  width: number;
-  height: number;
-}
+/** リビール(波打ちながら上から表示)の所要時間・イージング。 */
+const REVEAL_IN_DURATION = 1.1;
+const REVEAL_IN_EASE = "power1.out";
+const REVEAL_OUT_DURATION = 0.6;
+const REVEAL_OUT_EASE = "power1.in";
+
+/** 閉じる際、パネル側のUI(タイトル・レール・閉じるボタン)のフェード時間。 */
+const CHROME_FADE_OUT_DURATION = 0.3;
 
 interface OpenEventDetail {
   slug: string;
   title: string;
-  rect: ScreenRect;
-  imageUrl: string | null;
 }
 
 type SlideKind = "image" | "video";
@@ -50,21 +47,9 @@ interface SlideSource {
   kind: SlideKind;
   /** image: Sanity画像URL, video: Cloudflareにホストした動画の直接URL */
   url: string;
-  /** レール・クロスフェード用のポスター画像(video種別には無い) */
+  /** レール用のポスター画像(video種別には無い) */
   posterUrl: string | null;
   aspectRatio: number;
-}
-
-interface SlideEntry {
-  kind: SlideKind;
-  /** THREE.Mesh/THREE.Texture(three/webgpuには@types/threeのサブパス型定義が無いためany)。 */
-  mesh: any;
-  hover: HoverInvertMaterialHandle;
-  videoHandle: VideoTextureHandle | null;
-  texture: any;
-  aspectRatio: number;
-  baseWidth: number;
-  baseHeight: number;
 }
 
 /**
@@ -107,35 +92,34 @@ export class WorkDetail {
   private readonly root: HTMLElement;
   private readonly panelEl: HTMLElement;
   private readonly railEl: HTMLElement;
-  /** 可視コンテンツは持たない。ドラッグ/ホイール入力のヒットゾーン。 */
+  /** 可視コンテンツは持たない。ホイール/タッチ入力のヒットゾーン。 */
   private readonly scrollEl: HTMLElement;
   private readonly titleEl: HTMLElement;
   private readonly closeEl: HTMLElement;
   private readonly closeZoneEl: HTMLElement;
 
-  private heroEl: HTMLElement | null = null;
   private railItemEls: HTMLElement[] = [];
 
   private world: WorldContext | null = null;
   private readonly slideGroup = new THREE.Group();
   private readonly sharedGeometry = new THREE.PlaneGeometry(1, 1);
 
-  private slideEntries: SlideEntry[] = [];
   private slideSources: SlideSource[] = [];
+
+  /** 現在表示中のスライド1枚ぶんのPlane。切り替え時に作り直す。 */
+  private mesh: any = null;
+  private currentHandle: DetailSlideMaterialHandle | null = null;
+  private currentVideoHandle: VideoTextureHandle | null = null;
+  private currentAspectRatio = 16 / 9;
 
   private observer: Observer | null = null;
 
   private isOpen = false;
+  private isHovering = false;
 
   private currentSlug: string | null = null;
-  private originRect: ScreenRect | null = null;
-  private originImageUrl: string | null = null;
 
   private mediaCount = 0;
-  private hasLoop = false;
-
-  /** 論理的な現在位置。実データのindex範囲を超えて連続的に増減する(無限ループ用)。 */
-  private activeIndexFloat = 0;
   private activeRealIndex = 0;
 
   private panelWorldWidth = 0;
@@ -145,7 +129,6 @@ export class WorkDetail {
   private pixelsToWorld = 0;
 
   private cursor: CursorController | null = null;
-  private hoveredEntry: SlideEntry | null = null;
 
   private readonly raycaster = new THREE.Raycaster();
   private readonly pointerNdc = new THREE.Vector2();
@@ -209,11 +192,9 @@ export class WorkDetail {
 
     this.isOpen = true;
 
-    const { slug, title, rect, imageUrl } = event.detail;
+    const { slug, title } = event.detail;
 
     this.currentSlug = slug;
-    this.originRect = rect;
-    this.originImageUrl = imageUrl;
 
     /*
      * 背景のWorkList側(Plane)に選択した作品がそのまま残って
@@ -231,16 +212,12 @@ export class WorkDetail {
 
     this.showBackdrop();
 
-    const animationDone = this.animateHeroIn(rect, imageUrl);
     const portfolio = await this.fetchPortfolio(slug);
 
     if (!portfolio) {
-      await animationDone;
       this.failAndReset();
       return;
     }
-
-    await animationDone;
 
     await this.showDetail(portfolio, title);
   };
@@ -261,71 +238,6 @@ export class WorkDetail {
   }
 
   /**
-   * クリックされたPlaneの画面上の位置(rect)から、画面左半分いっぱいまで
-   * 拡大させるFLIP風アニメーション。ここはGSAP。
-   */
-  private animateHeroIn(
-    rect: ScreenRect,
-    imageUrl: string | null,
-  ): Promise<void> {
-    const hero = document.createElement("div");
-    hero.className = "work-detail__hero";
-
-    if (imageUrl) {
-      hero.style.backgroundImage = `url(${imageUrl})`;
-    }
-
-    hero.style.top = `${rect.top}px`;
-    hero.style.left = `${rect.left}px`;
-    hero.style.width = `${rect.width}px`;
-    hero.style.height = `${rect.height}px`;
-
-    document.body.appendChild(hero);
-    this.heroEl = hero;
-
-    /*
-     * 幅・高さをパネル最大サイズへ単純に伸ばすと縦横比が崩れて縦長に見えてしまうため、
-     * 元のPlaneと同じ縦横比を保ったまま収まる最大サイズ(containFit)へ成長させる。
-     */
-    const boxWidth = window.innerWidth / 2 - RAIL_WIDTH;
-    const boxHeight = window.innerHeight;
-    const aspectRatio = rect.width / rect.height;
-    const fit = containFit(aspectRatio, boxWidth, boxHeight);
-
-    const targetTop = (boxHeight - fit.height) / 2;
-    const targetLeft = RAIL_WIDTH + (boxWidth - fit.width) / 2;
-
-    return new Promise((resolve) => {
-      let settled = false;
-
-      const finish = (): void => {
-        if (settled) {
-          return;
-        }
-
-        settled = true;
-        resolve();
-      };
-
-      gsap.to(hero, {
-        top: targetTop,
-        left: targetLeft,
-        width: fit.width,
-        height: fit.height,
-        duration: 0.9,
-        ease: "power3.inOut",
-        onComplete: finish,
-      });
-
-      /*
-       * tabが非アクティブ等でアニメーションが進まない場合でも
-       * オーバーレイが開いたまま固まらないようにする安全策。
-       */
-      window.setTimeout(finish, 1500);
-    });
-  }
-
-  /**
    * 選択した作品に注目させるため、背景(Water/WorkListのグリッド)側全体を
    * ぼかす。実際のボカし(GSAP)はWorkList側が担当するため、
    * ここではイベントで状態を伝えるだけにする。
@@ -343,7 +255,7 @@ export class WorkDetail {
   }
 
   /**
-   * 取得したPortfolioデータから、スライド用のPlane群とレールを構築する。
+   * 取得したPortfolioデータから、レールと最初のスライドを表示する。
    */
   private async showDetail(
     portfolio: Portfolio,
@@ -355,31 +267,13 @@ export class WorkDetail {
     ];
 
     this.slideSources = mediaList.map((media) => resolveSlideSource(media));
-
     this.mediaCount = mediaList.length;
-    this.hasLoop = this.mediaCount > 1;
-    this.activeIndexFloat = 0;
-    this.activeRealIndex = 0;
 
     this.titleEl.textContent = title;
 
     this.updatePanelWorldRect();
-    this.buildSlideEntries();
     this.buildRail(title);
-    this.updateSlidePositions();
-
-    /*
-     * hero(FLIP用の仮要素)から、Plane側へ見た目そのままバトンタッチする。
-     */
-    this.slideEntries.forEach((entry) => {
-      entry.hover.setOpacity(0, false);
-      entry.hover.setOpacity(1);
-    });
-
-    window.setTimeout(() => {
-      this.heroEl?.remove();
-      this.heroEl = null;
-    }, 300);
+    this.showSlideAt(0);
 
     this.titleEl.style.visibility = "visible";
     this.closeEl.style.visibility = "visible";
@@ -432,165 +326,125 @@ export class WorkDetail {
   }
 
   /**
-   * 各メディアに対応するPlaneを作る。image/video(Cloudflare動画URL)
-   * どちらも実テクスチャを焼き込んだPlaneとして描画する。
+   * 指定indexのスライドへ切り替える。既存のPlaneは破棄し、
+   * 新しいテクスチャを波打ちリビールシェーダーで上から下へ表示する。
    */
-  private buildSlideEntries(): void {
-    this.disposeSlideEntries();
-
-    this.slideEntries = this.slideSources.map((source) => {
-      let texture: any;
-      let videoHandle: VideoTextureHandle | null = null;
-
-      if (source.kind === "video") {
-        videoHandle = createVideoTexture(source.url);
-        texture = videoHandle.texture;
-
-        videoHandle.ready.then(({ width, height }) => {
-          if (width > 0 && height > 0) {
-            source.aspectRatio = width / height;
-            this.updateSlidePositions();
-          }
-        });
-      } else {
-        const loadedTexture = new THREE.TextureLoader().load(
-          source.url,
-          (loaded: any) => {
-            const image = loaded.image as HTMLImageElement;
-
-            if (image?.naturalWidth > 0 && image?.naturalHeight > 0) {
-              source.aspectRatio = image.naturalWidth / image.naturalHeight;
-            }
-
-            this.updateSlidePositions();
-          },
-        );
-        loadedTexture.colorSpace = THREE.SRGBColorSpace;
-        texture = loadedTexture;
-      }
-
-      const hover = createHoverInvertMaterial(texture);
-      const mesh = new THREE.Mesh(this.sharedGeometry, hover.material);
-
-      /*
-       * WaterBackground(-1)とWorkListのグリッド(1)より手前に描画し、
-       * 選択中の作品が背景に埋もれないようにする。
-       */
-      mesh.renderOrder = 2;
-
-      /*
-       * 右奥・左手前になるよう軽くY軸回転させ、平面的に見えないようにする。
-       */
-      mesh.rotation.y = SLIDE_TILT_Y;
-
-      this.slideGroup.add(mesh);
-
-      const entry: SlideEntry = {
-        kind: source.kind,
-        mesh,
-        hover,
-        videoHandle,
-        texture,
-        aspectRatio: source.aspectRatio,
-        baseWidth: 0,
-        baseHeight: 0,
-      };
-
-      return entry;
-    });
-  }
-
-  /**
-   * 現在のスクロール位置(activeIndexFloat)から、各Planeの
-   * ローカル位置を計算する。実メディア数ぶんのPlaneだけで
-   * 無限ループに見せるため、各Planeを「現在位置に一番近い巻き戻し位置」に置く。
-   */
-  private updateSlidePositions(): void {
+  private showSlideAt(index: number): void {
     if (!this.world || this.mediaCount === 0) {
       return;
     }
 
-    this.slideEntries.forEach((entry, index) => {
-      const fit = containFit(
-        entry.aspectRatio,
-        this.panelWorldWidth,
-        this.panelWorldHeight,
-      );
+    const realIndex = mod(index, this.mediaCount);
+    const source = this.slideSources[realIndex];
 
-      entry.baseWidth = fit.width;
-      entry.baseHeight = fit.height;
-      entry.mesh.scale.set(fit.width, fit.height, 1);
-
-      entry.hover?.setPlaneSize(fit.width, fit.height, this.pixelsToWorld);
-
-      let localY = 0;
-
-      if (this.hasLoop) {
-        const totalSteps = this.mediaCount;
-        const nearestK = Math.round(
-          (this.activeIndexFloat - index) / totalSteps,
-        );
-        const virtualIndex = index + nearestK * totalSteps;
-
-        localY =
-          -(virtualIndex - this.activeIndexFloat) * this.panelWorldHeight;
-      }
-
-      entry.mesh.position.set(0, localY, 0);
-    });
-
-    this.updateActiveRealIndex();
-  }
-
-  private updateActiveRealIndex(): void {
-    const nearestIndex = mod(
-      Math.round(this.activeIndexFloat),
-      this.mediaCount || 1,
-    );
-
-    if (nearestIndex === this.activeRealIndex) {
+    if (!source) {
       return;
     }
 
-    this.activeRealIndex = nearestIndex;
+    this.activeRealIndex = realIndex;
+    this.currentAspectRatio = source.aspectRatio;
 
+    this.disposeCurrentSlide();
+
+    let map: any;
+
+    if (source.kind === "video") {
+      this.currentVideoHandle = createVideoTexture(source.url);
+      map = this.currentVideoHandle.texture;
+
+      this.currentVideoHandle.ready.then(({ width, height }) => {
+        if (width > 0 && height > 0) {
+          source.aspectRatio = width / height;
+          this.currentAspectRatio = source.aspectRatio;
+          this.applySlideSize();
+        }
+      });
+    } else {
+      map = new THREE.TextureLoader().load(source.url, (loaded: any) => {
+        const image = loaded.image as HTMLImageElement;
+
+        if (image?.naturalWidth > 0 && image?.naturalHeight > 0) {
+          source.aspectRatio = image.naturalWidth / image.naturalHeight;
+          this.currentAspectRatio = source.aspectRatio;
+          this.applySlideSize();
+        }
+      });
+      map.colorSpace = THREE.SRGBColorSpace;
+    }
+
+    const handle = createDetailSlideMaterial(map);
+    this.currentHandle = handle;
+
+    const mesh = new THREE.Mesh(this.sharedGeometry, handle.material);
+
+    /*
+     * WaterBackground(-1)とWorkListのグリッド(1)より手前に描画し、
+     * 選択中の作品が背景に埋もれないようにする。
+     */
+    mesh.renderOrder = 2;
+
+    /*
+     * 右奥・左手前になるよう軽くY軸回転させ、平面的に見えないようにする。
+     */
+    mesh.rotation.y = SLIDE_TILT_Y;
+
+    this.slideGroup.add(mesh);
+    this.mesh = mesh;
+
+    this.applySlideSize();
+
+    gsap.to(handle.progress, {
+      value: 1,
+      duration: REVEAL_IN_DURATION,
+      ease: REVEAL_IN_EASE,
+      overwrite: true,
+    });
+
+    this.updateRailActive();
+  }
+
+  private applySlideSize(): void {
+    if (!this.mesh || !this.currentHandle) {
+      return;
+    }
+
+    const fit = containFit(
+      this.currentAspectRatio,
+      this.panelWorldWidth,
+      this.panelWorldHeight,
+    );
+
+    this.mesh.scale.set(fit.width, fit.height, 1);
+    this.currentHandle.setPlaneSize(fit.width, fit.height, this.pixelsToWorld);
+  }
+
+  private updateRailActive(): void {
     this.railItemEls.forEach((railItem, railIndex) => {
-      railItem.classList.toggle("is-active", railIndex === nearestIndex);
+      railItem.classList.toggle("is-active", railIndex === this.activeRealIndex);
     });
   }
 
   /**
-   * ホイール/タッチ/ドラッグを1ジェスチャー=1スライドの
-   * カルーセル操作として扱う(元DOM実装の scroll-snap-stop: always と同じ挙動)。
+   * ホイール/タッチを1ジェスチャー=1スライドの切り替えとして扱う。
    */
   private initScrollObserver(): void {
     this.observer?.kill();
 
-    if (!this.hasLoop) {
+    if (this.mediaCount <= 1) {
       return;
     }
 
     /*
      * "pointer"は含めない。preventDefault:trueと組み合わせると
      * マウスクリックでのスライド遷移(navigateToWork)を阻害する恐れがあるため、
-     * 元のDOM実装と同じくホイール/タッチのみをスクロール操作として扱う。
+     * ホイール/タッチのみをスクロール操作として扱う。
      */
     this.observer = Observer.create({
       target: this.scrollEl,
       type: "wheel,touch",
       preventDefault: true,
-      onUp: () => this.goToSlide(this.activeIndexFloat - 1),
-      onDown: () => this.goToSlide(this.activeIndexFloat + 1),
-    });
-  }
-
-  private goToSlide(targetIndex: number): void {
-    gsap.to(this, {
-      activeIndexFloat: targetIndex,
-      duration: SLIDE_TRANSITION_DURATION,
-      ease: "power3.inOut",
-      overwrite: true,
-      onUpdate: () => this.updateSlidePositions(),
+      onUp: () => this.showSlideAt(this.activeRealIndex - 1),
+      onDown: () => this.showSlideAt(this.activeRealIndex + 1),
     });
   }
 
@@ -609,12 +463,9 @@ export class WorkDetail {
       }
 
       railItem.addEventListener("click", () => {
-        const totalSteps = this.mediaCount;
-        const nearestK = Math.round(
-          (this.activeIndexFloat - index) / totalSteps,
-        );
-
-        this.goToSlide(index + nearestK * totalSteps);
+        if (index !== this.activeRealIndex) {
+          this.showSlideAt(index);
+        }
       });
 
       this.railEl.appendChild(railItem);
@@ -640,9 +491,9 @@ export class WorkDetail {
     window.removeEventListener("click", this.handleClick);
   }
 
-  private raycastAt(clientX: number, clientY: number): SlideEntry | null {
-    if (!this.world) {
-      return null;
+  private raycastMesh(clientX: number, clientY: number): boolean {
+    if (!this.world || !this.mesh) {
+      return false;
     }
 
     this.pointerNdc.x = (clientX / window.innerWidth) * 2 - 1;
@@ -653,22 +504,19 @@ export class WorkDetail {
       this.world.cameraController.camera,
     );
 
-    const meshes = this.slideEntries.map((entry) => entry.mesh);
-
-    const intersections = this.raycaster.intersectObjects(meshes, false);
+    const intersections = this.raycaster.intersectObject(this.mesh, false);
 
     if (intersections.length === 0) {
-      return null;
+      return false;
     }
 
     const hit = intersections[0];
-    const entry = this.slideEntries.find((e) => e.mesh === hit.object);
 
-    if (entry && hit.uv) {
-      entry.hover?.setPointerUv(hit.uv.x, hit.uv.y);
+    if (hit.uv) {
+      this.currentHandle?.setPointerUv(hit.uv.x, hit.uv.y);
     }
 
-    return entry ?? null;
+    return true;
   }
 
   private handlePointerMove = (event: PointerEvent): void => {
@@ -676,20 +524,19 @@ export class WorkDetail {
       return;
     }
 
-    const entry = this.raycastAt(event.clientX, event.clientY);
+    const isHit = this.raycastMesh(event.clientX, event.clientY);
 
-    if (entry !== this.hoveredEntry) {
-      this.hoveredEntry?.hover?.setActive(false);
-      this.hoveredEntry = entry;
-
-      if (entry) {
-        entry.hover?.setActive(true);
-        this.cursor?.enterLabel("Discover →");
-      } else {
-        this.cursor?.leaveLabel();
-      }
-
+    if (isHit === this.isHovering) {
       return;
+    }
+
+    this.isHovering = isHit;
+    this.currentHandle?.setHoverActive(isHit);
+
+    if (isHit) {
+      this.cursor?.enterLabel("Discover →");
+    } else {
+      this.cursor?.leaveLabel();
     }
   };
 
@@ -698,9 +545,7 @@ export class WorkDetail {
       return;
     }
 
-    const entry = this.raycastAt(event.clientX, event.clientY);
-
-    if (entry) {
+    if (this.raycastMesh(event.clientX, event.clientY)) {
       this.navigateToWork();
     }
   };
@@ -712,7 +557,7 @@ export class WorkDetail {
   private initResizeHandler(): void {
     this.resizeHandler = (): void => {
       this.updatePanelWorldRect();
-      this.updateSlidePositions();
+      this.applySlideSize();
     };
 
     window.addEventListener("resize", this.resizeHandler);
@@ -753,8 +598,8 @@ export class WorkDetail {
   };
 
   /**
-   * 画面右クリックで、拡大前の状態(サムネイルの位置・サイズ)へ
-   * 戻すFLIP風アニメーション。ここはGSAP。
+   * 画面右クリックで閉じる。表示中のPlaneを逆再生(下から上へ隠れる)
+   * させながら、パネルUIをフェードアウトする。ここはGSAP。
    */
   private closeToOrigin = (): void => {
     if (!this.isOpen) {
@@ -763,118 +608,20 @@ export class WorkDetail {
 
     this.isOpen = false;
 
-    const originRect = this.originRect;
-
-    gsap.set([this.panelEl, this.closeEl], { autoAlpha: 0 });
     document.body.classList.remove("has-open-work-detail");
-
     this.hideBackdrop();
 
-    if (!originRect) {
-      this.resetState();
-      return;
-    }
-
-    const activeSource = this.slideSources[this.activeRealIndex];
-    const activeUrl = activeSource?.posterUrl ?? null;
-    const originUrl = this.originImageUrl;
-
-    /*
-     * サムネイル以外(previewMediaの2枚目以降)を見ている状態で戻る場合、
-     * 表示中の画像とサムネイル画像が異なるため、位置アニメーションの終盤で
-     * 画像自体もクロスフェードさせて突然の切り替わりを防ぐ。
-     */
-    const needsCrossfade = this.activeRealIndex !== 0 && !!originUrl;
-
-    const hero = document.createElement("div");
-    hero.className = "work-detail__hero";
-
-    const currentLayer = document.createElement("div");
-    currentLayer.className = "work-detail__hero-layer";
-
-    if (activeUrl) {
-      currentLayer.style.backgroundImage = `url(${activeUrl})`;
-    }
-
-    hero.appendChild(currentLayer);
-
-    let targetLayer: HTMLElement | null = null;
-
-    if (needsCrossfade) {
-      targetLayer = document.createElement("div");
-      targetLayer.className = "work-detail__hero-layer";
-      targetLayer.style.backgroundImage = `url(${originUrl})`;
-      targetLayer.style.opacity = "0";
-
-      hero.appendChild(targetLayer);
-    }
-
-    /*
-     * 縦横比を保ったまま縮小させるため、開始位置も実際のPlaneと同じ
-     * containFitの矩形に合わせる(フルパネル矩形のままだと縦長に歪む)。
-     */
-    const boxWidth = window.innerWidth / 2 - RAIL_WIDTH;
-    const boxHeight = window.innerHeight;
-    const startFit = containFit(
-      activeSource?.aspectRatio ?? 16 / 9,
-      boxWidth,
-      boxHeight,
+    gsap.to(
+      [this.panelEl, this.closeEl, this.railEl, this.titleEl],
+      { autoAlpha: 0, duration: CHROME_FADE_OUT_DURATION },
     );
 
-    hero.style.top = `${(boxHeight - startFit.height) / 2}px`;
-    hero.style.left = `${RAIL_WIDTH + (boxWidth - startFit.width) / 2}px`;
-    hero.style.width = `${startFit.width}px`;
-    hero.style.height = `${startFit.height}px`;
-
-    document.body.appendChild(hero);
-
-    this.slideEntries.forEach((entry) => entry.hover.setOpacity(0));
-
-    const timeline = gsap.timeline({
-      onComplete: () => {
-        hero.remove();
-        this.resetState();
-      },
-    });
-
-    timeline.to(
-      hero,
-      {
-        top: originRect.top,
-        left: originRect.left,
-        width: originRect.width,
-        height: originRect.height,
-        duration: 0.7,
-        ease: "power3.inOut",
-      },
-      0,
-    );
-
-    if (targetLayer) {
-      timeline.to(
-        targetLayer,
-        {
-          opacity: 1,
-          duration: 0.3,
-          ease: "power2.out",
-        },
-        0.4,
-      );
-    }
-  };
-
-  /**
-   * データ取得に失敗した場合の後始末。
-   */
-  private failAndReset(): void {
-    document.body.classList.remove("has-open-work-detail");
-
-    this.hideBackdrop();
-
-    if (this.heroEl) {
-      gsap.to(this.heroEl, {
-        autoAlpha: 0,
-        duration: 0.4,
+    if (this.currentHandle) {
+      gsap.to(this.currentHandle.progress, {
+        value: 0,
+        duration: REVEAL_OUT_DURATION,
+        ease: REVEAL_OUT_EASE,
+        overwrite: true,
         onComplete: () => this.resetState(),
       });
 
@@ -882,23 +629,31 @@ export class WorkDetail {
     }
 
     this.resetState();
+  };
+
+  /**
+   * データ取得に失敗した場合の後始末。
+   */
+  private failAndReset(): void {
+    document.body.classList.remove("has-open-work-detail");
+    this.hideBackdrop();
+    this.resetState();
   }
 
-  private disposeSlideEntries(): void {
-    this.slideEntries.forEach((entry) => {
-      entry.hover.dispose();
+  private disposeCurrentSlide(): void {
+    if (this.mesh) {
+      this.slideGroup.remove(this.mesh);
+      this.mesh = null;
+    }
 
-      if (entry.videoHandle) {
-        /* videoHandle.dispose()がtexture.disposeも兼ねる */
-        entry.videoHandle.dispose();
-      } else {
-        entry.texture?.dispose();
-      }
+    this.currentHandle?.dispose();
+    this.currentHandle = null;
 
-      this.slideGroup.remove(entry.mesh);
-    });
-
-    this.slideEntries = [];
+    if (this.currentVideoHandle) {
+      /* videoHandle.dispose()がtexture.disposeも兼ねる */
+      this.currentVideoHandle.dispose();
+      this.currentVideoHandle = null;
+    }
   }
 
   private resetState(): void {
@@ -914,12 +669,8 @@ export class WorkDetail {
     this.destroyPointerEvents();
     this.destroyResizeHandler();
 
-    this.hoveredEntry?.hover?.setActive(false);
-    this.hoveredEntry = null;
+    this.isHovering = false;
     this.cursor?.leaveLabel();
-
-    this.heroEl?.remove();
-    this.heroEl = null;
 
     gsap.killTweensOf(this.panelEl);
     gsap.set(this.panelEl, { autoAlpha: 1, x: 0 });
@@ -937,13 +688,11 @@ export class WorkDetail {
 
     this.railEl.innerHTML = "";
 
-    this.disposeSlideEntries();
+    this.disposeCurrentSlide();
 
     this.railItemEls = [];
     this.slideSources = [];
     this.mediaCount = 0;
-    this.hasLoop = false;
-    this.activeIndexFloat = 0;
     this.activeRealIndex = 0;
 
     if (this.currentSlug) {
@@ -955,8 +704,6 @@ export class WorkDetail {
     }
 
     this.currentSlug = null;
-    this.originRect = null;
-    this.originImageUrl = null;
   }
 
   public destroy(): void {
@@ -974,11 +721,9 @@ export class WorkDetail {
 
     this.cursor = null;
 
-    this.disposeSlideEntries();
+    this.disposeCurrentSlide();
     this.sharedGeometry.dispose();
 
     this.world?.scene.remove(this.slideGroup);
-
-    this.heroEl?.remove();
   }
 }
