@@ -17,7 +17,7 @@ import {
   WATER_BOUNDS_X,
   WATER_BOUNDS_Y,
 } from "./WaterCompute/index";
-import type { RockBackdrop } from "../WaterBackground/RockBackdrop";
+import type { RockBackdrop } from "./WaterBackground/RockBackdrop";
 
 const { texture, uv, mix, materialColor, vec2, sin, cos, dot, time } =
   TSL as any;

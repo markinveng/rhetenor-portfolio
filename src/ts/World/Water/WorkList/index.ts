@@ -7,15 +7,15 @@ import { Draggable } from "gsap/Draggable";
 // @ts-ignore
 import { InertiaPlugin } from "gsap/InertiaPlugin";
 
-import { getOrCreateWorld, type WorldContext } from "../index";
-import { urlFor } from "../../Sanity";
-import { createVideoTexture, type VideoTextureHandle } from "../../utils/media";
+import { getOrCreateWorld, type WorldContext } from "../../index";
+import { urlFor } from "../../../Sanity";
+import { createVideoTexture, type VideoTextureHandle } from "../../../utils/media";
 import {
   createBackgroundBlurMaterial,
   type BackgroundBlurMaterialHandle,
-} from "../../materials/createBackgroundBlurMaterial";
-import { getOrCreateCursor, type CursorController } from "../../Cursor";
-import type { PortfolioSummary } from "../../../types/portfolio";
+} from "../../../materials/createBackgroundBlurMaterial";
+import { getOrCreateCursor, type CursorController } from "../../../Cursor";
+import type { PortfolioSummary } from "../../../../types/portfolio";
 
 gsap.registerPlugin(Draggable, InertiaPlugin);
 

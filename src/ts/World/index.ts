@@ -2,8 +2,8 @@ import * as THREE from "three/webgpu";
 import { CameraController } from "../CameraController";
 import { RenderPipeline } from "../RenderPipeline";
 import { DebugGUI } from "../DebugGUI";
-import { Water } from "./Water";
-import { RockBackdrop } from "./WaterBackground/RockBackdrop";
+import type { Water } from "./Water";
+import type { RockBackdrop } from "./Water/WaterBackground/RockBackdrop";
 
 export interface WorldContext {
   /** THREE.Scene(three/webgpuには@types/threeのサブパス型定義が無いためany)。 */
@@ -12,10 +12,16 @@ export interface WorldContext {
   renderPipeline: RenderPipeline;
   debugGUI: DebugGUI | null;
   /**
-   * WaterBackground/WorkListが共有するWaterインスタンス。sampleWave()で
+   * WaterBackground(トップページ専用)が生成した場合のみ入る。sampleWave()で
    * 水面の高さ・法線をサンプリングできる(WorkListのPlaneジオメトリの歪みに使用)。
+   * WaterBackgroundを含まないページ(discoverなど)ではnullのまま。
    */
-  water: Water;
+  water: Water | null;
+  /**
+   * WaterBackground初期化時に、生成したWater/RockBackdropを共有Worldへ登録する。
+   * disposeWorld()で(登録されていれば)まとめて破棄される。
+   */
+  registerWater(water: Water, rockBackdrop: RockBackdrop): void;
   /** 毎フレーム呼ばれるコールバックを登録する。戻り値の関数で解除できる。 */
   registerUpdate(fn: (delta: number) => void): () => void;
   /** 現在のカメラ視点で、z=0平面上のpx→world単位への変換係数。 */
@@ -29,8 +35,11 @@ let lastTime = 0;
 let resizeHandler: (() => void) | null = null;
 
 /**
- * WaterBackground と WorkList(Plane版ギャラリー)が同じCanvas/Sceneを
- * 共有するための唯一の入り口。最初に呼ばれたときだけシーン一式を作る。
+ * WaterBackground / WorkList / WorkDetail(いずれもトップページ専用)や
+ * DiscoverGallery(discoverページ専用)が同じCanvas/Sceneを共有するための唯一の入り口。
+ * 最初に呼ばれたときだけScene/Camera/Rendererを作る。
+ * Water(水面シミュレーション)はここでは作らない — トップページでのみ
+ * WaterBackgroundがregisterWater()経由で登録する(discoverページ等では持たない)。
  */
 export function getOrCreateWorld(container: HTMLDivElement): WorldContext {
   if (context) {
@@ -71,18 +80,6 @@ export function getOrCreateWorld(container: HTMLDivElement): WorldContext {
     return visibleHeight / window.innerHeight;
   }
 
-  /*
-   * Waterは常時流れるアンビエントフローを持つため、WaterBackground/WorkListの
-   * どちらが先に初期化されても同じインスタンスを参照できるよう、
-   * 共有World自身が生成・所有する(WaterBackgroundは薄いラッパーとしてポインタ入力を渡すだけ)。
-   */
-  rockBackdrop = new RockBackdrop(scene);
-  const water = new Water(scene, rockBackdrop);
-
-  if (debugGUI) {
-    water.registerGUI(debugGUI.addFolder("Water"));
-  }
-
   renderPipeline.renderer.setAnimationLoop((time: number) => {
     const delta = lastTime ? (time - lastTime) / 1000 : 0;
     lastTime = time;
@@ -103,7 +100,15 @@ export function getOrCreateWorld(container: HTMLDivElement): WorldContext {
     cameraController,
     renderPipeline,
     debugGUI,
-    water,
+    water: null,
+
+    registerWater(waterInstance, rockBackdropInstance) {
+      rockBackdrop = rockBackdropInstance;
+
+      if (context) {
+        context.water = waterInstance;
+      }
+    },
 
     registerUpdate(fn) {
       updateFns.push(fn);
@@ -115,16 +120,6 @@ export function getOrCreateWorld(container: HTMLDivElement): WorldContext {
 
     getPixelsToWorld: computePixelsToWorld,
   };
-
-  context.registerUpdate(() => {
-    const pixelsToWorld = computePixelsToWorld();
-
-    rockBackdrop?.update(pixelsToWorld);
-    water.update(
-      (node, dispatchSize) => renderPipeline.compute(node, dispatchSize),
-      pixelsToWorld,
-    );
-  });
 
   return context;
 }
@@ -147,7 +142,7 @@ export function disposeWorld(): void {
   }
 
   context.renderPipeline.renderer.setAnimationLoop(null);
-  context.water.dispose();
+  context.water?.dispose();
   rockBackdrop?.dispose();
   rockBackdrop = null;
   context.renderPipeline.dispose();

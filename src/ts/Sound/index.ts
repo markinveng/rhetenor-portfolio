@@ -26,6 +26,18 @@ function createHowl(url: string): Howl {
     loop: true,
     volume: 0.5,
     mute: muted,
+    /*
+     * bgm.mp3は未アップロードのプレースホルダーのため(DEFAULT_SOUND_URL参照)、
+     * ページ読み込みのたびに先読みして404を出さないよう、
+     * 実際にtoggle()で再生されるまで読み込まない。
+     */
+    preload: false,
+    onloaderror: (_id, error) => {
+      console.warn(
+        `[Sound] BGM(${url})の読み込みに失敗しました。ファイルが未配置の可能性があります。`,
+        error,
+      );
+    },
   });
 }
 

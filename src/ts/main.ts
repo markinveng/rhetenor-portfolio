@@ -1,5 +1,5 @@
-import { WorkList } from "./World/WorkList";
-import { WorkDetail } from "./World/WorkDetail";
+import { WorkList } from "./World/Water/WorkList";
+import { WorkDetail } from "./World/Water/WorkDetail";
 import { getOrCreateCursor, disposeCursor } from "./Cursor";
 
 /*

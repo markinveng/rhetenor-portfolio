@@ -7,16 +7,16 @@ import { navigate } from "astro:transitions/client";
 
 import * as THREE from "three/webgpu";
 
-import { getOrCreateWorld, type WorldContext } from "../index";
-import { PortfolioApi, urlFor } from "../../Sanity";
-import { createVideoTexture, type VideoTextureHandle } from "../../utils/media";
+import { getOrCreateWorld, type WorldContext } from "../../index";
+import { PortfolioApi, urlFor } from "../../../Sanity";
+import { createVideoTexture, type VideoTextureHandle } from "../../../utils/media";
 import {
   createDetailSlideMaterial,
   type DetailSlideMaterialHandle,
-} from "../../materials/createDetailSlideMaterial";
-import { getOrCreateCursor, type CursorController } from "../../Cursor";
-import { playSelectSound } from "../../Sound";
-import type { MediaItem, Portfolio } from "../../../types/portfolio";
+} from "../../../materials/createDetailSlideMaterial";
+import { getOrCreateCursor, type CursorController } from "../../../Cursor";
+import { playSelectSound } from "../../../Sound";
+import type { MediaItem, Portfolio } from "../../../../types/portfolio";
 
 gsap.registerPlugin(Observer);
 

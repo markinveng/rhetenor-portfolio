@@ -1,9 +1,14 @@
-import { getOrCreateWorld, disposeWorld } from "../index";
+import { getOrCreateWorld, disposeWorld } from "../../index";
+import { Water } from "../index";
+import { RockBackdrop } from "./RockBackdrop";
 
 /**
  * WaterBackground を初期化し、後始末用のクリーンアップ関数を返す。
- * Water本体(計算・描画・常時のアンビエントフロー)は共有World自身が生成・所有しており
- * (World/index.ts参照)、このモジュールはポインタ入力をWaterへ橋渡しする薄いラッパーに徹する。
+ * トップページ専用の部品。Water本体(計算・描画・常時のアンビエントフロー)と
+ * RockBackdropはここで生成し、共有World(registerWater)へ登録することで、
+ * 同じCanvas/Sceneを使うWorkListのPlaneからもsampleWave()経由で参照できるようにする。
+ * discoverページなどWaterBackgroundを含まないページでは、共有Worldは
+ * Scene/Camera/Rendererのみを持ち、Waterは生成されない。
  */
 export default function initWaterBackground(
   container: HTMLDivElement | null,
@@ -13,7 +18,15 @@ export default function initWaterBackground(
   }
 
   const world = getOrCreateWorld(container);
-  const water = world.water;
+
+  const rockBackdrop = new RockBackdrop(world.scene);
+  const water = new Water(world.scene, rockBackdrop);
+
+  world.registerWater(water, rockBackdrop);
+
+  if (world.debugGUI) {
+    water.registerGUI(world.debugGUI.addFolder("Water"));
+  }
 
   const handlePointerMove = (event: PointerEvent): void => {
     water.updatePointer(
@@ -40,11 +53,24 @@ export default function initWaterBackground(
   window.addEventListener("pointerup", handlePointerUp);
   window.addEventListener("pointerleave", handlePointerLeave);
 
+  const unregisterUpdate = world.registerUpdate(() => {
+    const pixelsToWorld = world.getPixelsToWorld();
+
+    rockBackdrop.update(pixelsToWorld);
+    water.update(
+      (node, dispatchSize) =>
+        world.renderPipeline.compute(node, dispatchSize),
+      pixelsToWorld,
+    );
+  });
+
   return () => {
     window.removeEventListener("pointermove", handlePointerMove);
     window.removeEventListener("pointerdown", handlePointerDown);
     window.removeEventListener("pointerup", handlePointerUp);
     window.removeEventListener("pointerleave", handlePointerLeave);
+
+    unregisterUpdate();
 
     /*
      * このCanvasを使うのはWaterBackground/WorkListのみのため、

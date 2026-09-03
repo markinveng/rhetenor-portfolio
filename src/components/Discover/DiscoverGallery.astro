@@ -1,0 +1,45 @@
+<div class="discover-gallery" data-discover-gallery></div>
+
+<script>
+  import { DiscoverGallery } from "../../ts/World/Discover";
+
+  let gallery: DiscoverGallery | null = null;
+
+  const start = (): void => {
+    gallery?.destroy();
+
+    const root = document.querySelector<HTMLElement>(
+      "[data-discover-gallery]",
+    );
+
+    if (!root) {
+      return;
+    }
+
+    gallery = new DiscoverGallery(root);
+    gallery.init();
+  };
+
+  // astro:transitions(ClientRouter)の遷移のたびに作り直す。
+  document.addEventListener("astro:page-load", start);
+
+  // ページ遷移/リロード時の後始末（useEffect の return 相当）
+  document.addEventListener("astro:before-swap", () => gallery?.destroy(), {
+    once: false,
+  });
+
+  window.addEventListener("beforeunload", () => gallery?.destroy(), {
+    once: true,
+  });
+</script>
+
+<style>
+  .discover-gallery {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+
+    touch-action: none;
+    overflow: hidden;
+  }
+</style>

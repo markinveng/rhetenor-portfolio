@@ -53,13 +53,14 @@ export interface BackgroundBlurMaterialHandle {
  * aspectRatio(幅/高さ)は波紋を円形に見せるための補正に使う。
  * water(WaterBackgroundと共有するWaterインスタンス)のsampleWave()でPlane自身の
  * ワールド座標における水面の法線を取得し、サムネイル画像を波紋に合わせて屈折させる
- * (Plane自体のジオメトリは動かさない)。
+ * (Plane自体のジオメトリは動かさない)。WaterBackgroundを含まないページでは
+ * water(共有World.water)がnullになるため、その場合は屈折を無効化する。
  */
 export function createBackgroundBlurMaterial(
   map: any,
   blurAmount: any,
   aspectRatio: number,
-  water: Water,
+  water: Water | null,
 ): BackgroundBlurMaterialHandle {
   const material = new (THREE as any).MeshBasicNodeMaterial({
     transparent: true,
@@ -79,12 +80,17 @@ export function createBackgroundBlurMaterial(
      * アンビエントフロー)に合わせてサムネイル画像だけを屈折させる。
      * このPlane自身の(画面上の)ワールド座標をWaterのローカル座標系へ変換し、
      * Waterと同じ高さ場から法線を取り出してサンプリングUVをずらす。
+     * waterがない(WaterBackgroundを含まないページ)場合は屈折オフセットなし。
      */
-    const localXY = modelPosition.xy.mul(water.worldToLocalScale);
-    const wave = water.sampleWave(localXY);
-    const refractionOffset = vec2(wave.normalX, wave.normalY).mul(
-      WATER_REFRACTION_STRENGTH,
-    );
+    let refractionOffset = vec2(0, 0);
+
+    if (water) {
+      const localXY = modelPosition.xy.mul(water.worldToLocalScale);
+      const wave = water.sampleWave(localXY);
+      refractionOffset = vec2(wave.normalX, wave.normalY).mul(
+        WATER_REFRACTION_STRENGTH,
+      );
+    }
 
     const rippleOffset = computeRippleUvOffset(
       uvNode,
