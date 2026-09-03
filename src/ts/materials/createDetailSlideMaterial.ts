@@ -3,6 +3,7 @@ import * as THREE from "three/webgpu";
 // @ts-ignore
 import * as TSL from "three/tsl";
 import gsap from "gsap";
+import { computeRippleUvOffset } from "./pointerRipple";
 
 const {
   Fn,
@@ -61,6 +62,8 @@ export function createDetailSlideMaterial(map: any): DetailSlideMaterialHandle {
   const mouseUv = uniform(new THREE.Vector2(0.5, 0.5));
   const radiusUv = uniform(new THREE.Vector2(0.2, 0.2));
   const hoverMix = uniform(0);
+  /** Plane幅/高さ。波紋(リップル)を円形に見せるための補正に使う。 */
+  const planeAspect = uniform(1);
 
   const material = new (THREE as any).MeshBasicNodeMaterial({
     transparent: true,
@@ -70,7 +73,18 @@ export function createDetailSlideMaterial(map: any): DetailSlideMaterialHandle {
 
   material.colorNode = Fn(() => {
     const uvNode = uv();
-    const baseColor = texture(map, uvNode);
+
+    /*
+     * ホバー中のポインタ位置(mouseUv)から輪が外向きに広がる波紋でUVを歪ませてから
+     * サンプリングする。リビール/色反転マスクは元のuvNodeのまま(別々の効果として独立させる)。
+     */
+    const rippleOffset = computeRippleUvOffset(
+      uvNode,
+      mouseUv,
+      planeAspect,
+      hoverMix,
+    );
+    const baseColor = texture(map, uvNode.add(rippleOffset));
 
     /*
      * リビールのエッジ位置(uv.y換算)。横波と粒状ノイズを足して
@@ -130,6 +144,7 @@ export function createDetailSlideMaterial(map: any): DetailSlideMaterialHandle {
         worldWidth > 0 ? radiusWorld / worldWidth : 0.2,
         worldHeight > 0 ? radiusWorld / worldHeight : 0.2,
       );
+      planeAspect.value = worldHeight > 0 ? worldWidth / worldHeight : 1;
     },
 
     setPointerUv(u, v) {

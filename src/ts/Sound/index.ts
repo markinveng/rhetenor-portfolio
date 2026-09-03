@@ -11,9 +11,14 @@ export interface SoundController {
 /** 仮の音源URL。mp3は後でアップロードされる予定のためファイルは未配置。 */
 const DEFAULT_SOUND_URL = "/sounds/bgm.mp3";
 
+/** 作品選択時に一度だけ鳴らすSE。 */
+const SELECT_SOUND_URL = "/assets/select.mp3";
+
 let howl: Howl | null = null;
 let controller: SoundController | null = null;
 let muted = true;
+
+let selectHowl: Howl | null = null;
 
 function createHowl(url: string): Howl {
   return new Howl({
@@ -63,4 +68,21 @@ export function getOrCreateSound(): SoundController {
   };
 
   return controller;
+}
+
+/**
+ * 作品を選択して詳細ページへ遷移する際に一度だけ鳴らすSE。
+ * BGMのミュート状態に連動させ、サウンドを有効にしていないユーザーへ
+ * 不意打ちで鳴らさないようにする。
+ */
+export function playSelectSound(): void {
+  if (muted) {
+    return;
+  }
+
+  if (!selectHowl) {
+    selectHowl = new Howl({ src: [SELECT_SOUND_URL], volume: 0.7 });
+  }
+
+  selectHowl.play();
 }

@@ -15,6 +15,7 @@ import {
   type DetailSlideMaterialHandle,
 } from "../../materials/createDetailSlideMaterial";
 import { getOrCreateCursor, type CursorController } from "../../Cursor";
+import { playSelectSound } from "../../Sound";
 import type { MediaItem, Portfolio } from "../../../types/portfolio";
 
 gsap.registerPlugin(Observer);
@@ -580,6 +581,11 @@ export class WorkDetail {
     const targetUrl = slug
       ? `/discover?prov=${encodeURIComponent(slug)}`
       : "/error";
+
+    /*
+     * トランジション(スクロール→ページ遷移)と並行して選択SEを一度だけ鳴らす。
+     */
+    playSelectSound();
 
     /*
      * Astroのnavigate()でSPA的に遷移させることで、

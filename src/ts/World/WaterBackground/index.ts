@@ -1,9 +1,9 @@
 import { getOrCreateWorld, disposeWorld } from "../index";
-import { Water } from "../Water";
 
 /**
  * WaterBackground を初期化し、後始末用のクリーンアップ関数を返す。
- * Scene/Camera/Rendererは共有Worldから取得し、WorkListのPlaneギャラリーと同じCanvasに統合する。
+ * Water本体(計算・描画・常時のアンビエントフロー)は共有World自身が生成・所有しており
+ * (World/index.ts参照)、このモジュールはポインタ入力をWaterへ橋渡しする薄いラッパーに徹する。
  */
 export default function initWaterBackground(
   container: HTMLDivElement | null,
@@ -13,11 +13,7 @@ export default function initWaterBackground(
   }
 
   const world = getOrCreateWorld(container);
-  const water = new Water(world.scene);
-
-  if (world.debugGUI) {
-    water.registerGUI(world.debugGUI.addFolder("Water"));
-  }
+  const water = world.water;
 
   const handlePointerMove = (event: PointerEvent): void => {
     water.updatePointer(
@@ -44,26 +40,15 @@ export default function initWaterBackground(
   window.addEventListener("pointerup", handlePointerUp);
   window.addEventListener("pointerleave", handlePointerLeave);
 
-  const unregisterUpdate = world.registerUpdate(() => {
-    water.update(
-      (node, dispatchSize) =>
-        world.renderPipeline.compute(node, dispatchSize),
-      world.getPixelsToWorld(),
-    );
-  });
-
   return () => {
     window.removeEventListener("pointermove", handlePointerMove);
     window.removeEventListener("pointerdown", handlePointerDown);
     window.removeEventListener("pointerup", handlePointerUp);
     window.removeEventListener("pointerleave", handlePointerLeave);
 
-    unregisterUpdate();
-    water.dispose();
-
     /*
      * このCanvasを使うのはWaterBackground/WorkListのみのため、
-     * ページ離脱時にまとめて解放する。
+     * ページ離脱時にまとめて解放する(Water/RockBackdropの破棄はdisposeWorld内で行う)。
      */
     disposeWorld();
   };

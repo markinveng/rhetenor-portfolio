@@ -10,7 +10,10 @@ import { InertiaPlugin } from "gsap/InertiaPlugin";
 import { getOrCreateWorld, type WorldContext } from "../index";
 import { urlFor } from "../../Sanity";
 import { createVideoTexture, type VideoTextureHandle } from "../../utils/media";
-import { createBackgroundBlurMaterial } from "../../materials/createBackgroundBlurMaterial";
+import {
+  createBackgroundBlurMaterial,
+  type BackgroundBlurMaterialHandle,
+} from "../../materials/createBackgroundBlurMaterial";
 import { getOrCreateCursor, type CursorController } from "../../Cursor";
 import type { PortfolioSummary } from "../../../types/portfolio";
 
@@ -42,6 +45,8 @@ interface PlaneEntry {
   /** THREE.Mesh(three/webgpuには@types/threeのサブパス型定義が無いためany)。 */
   mesh: any;
   material: any;
+  /** ホバー時の波紋(リップル)の中心/強さを制御するハンドル。 */
+  ripple: BackgroundBlurMaterialHandle;
   /** ホバー時の拡大に対する基準スケール(world単位)。 */
   baseScale: { x: number; y: number };
   /** サムネイルが動画の場合の再生ハンドル(dispose用)。 */
@@ -149,7 +154,7 @@ export class WorkList {
    */
   private buildPlanes(): void {
     this.entries = this.portfolios.map((portfolio) => {
-      const { material, videoHandle } = this.createEntryMaterial(
+      const { material, ripple, videoHandle } = this.createEntryMaterial(
         portfolio.thumbnailMedia,
       );
 
@@ -166,6 +171,7 @@ export class WorkList {
         portfolio,
         mesh,
         material,
+        ripple,
         baseScale: { x: 1, y: 1 },
         videoHandle,
       };
@@ -176,37 +182,54 @@ export class WorkList {
 
   /**
    * SanityのCDN画像、またはCloudflareにホストした動画をテクスチャとして読み込み、
-   * ぼかしシェーダー付きマテリアルを作る。
+   * ぼかし/波紋シェーダー付きマテリアルを作る。
    */
   private createEntryMaterial(
     media: PortfolioSummary["thumbnailMedia"],
-  ): { material: any; videoHandle: VideoTextureHandle | null } {
+  ): {
+    material: any;
+    ripple: BackgroundBlurMaterialHandle;
+    videoHandle: VideoTextureHandle | null;
+  } {
+    /*
+     * createEntryMaterialはbuildPlanes()経由でのみ呼ばれ、その時点でinit()内の
+     * `this.world = getOrCreateWorld(container)` が必ず先に実行済みのためnullにならない。
+     */
+    const water = this.world!.water;
+
     if (media.type === "cloudflareVideo") {
       const videoHandle = createVideoTexture(media.cloudflareVideoUrl);
-      const material = createBackgroundBlurMaterial(
+      const handle = createBackgroundBlurMaterial(
         videoHandle.texture,
         this.backgroundBlur,
+        ASPECT_RATIO,
+        water,
       );
 
-      material.color.set(0xffffff);
-      material.opacity = REST_OPACITY;
+      handle.material.color.set(0xffffff);
+      handle.material.opacity = REST_OPACITY;
 
-      return { material, videoHandle };
+      return { material: handle.material, ripple: handle, videoHandle };
     }
 
     const url = urlFor(media.image).width(600).url();
 
     const texture = this.textureLoader.load(url, (loaded: any) => {
       loaded.colorSpace = THREE.SRGBColorSpace;
-      material.color.set(0xffffff);
-      material.needsUpdate = true;
+      handle.material.color.set(0xffffff);
+      handle.material.needsUpdate = true;
     });
 
-    const material = createBackgroundBlurMaterial(texture, this.backgroundBlur);
-    material.color.set(0x1a1a1a);
-    material.opacity = REST_OPACITY;
+    const handle = createBackgroundBlurMaterial(
+      texture,
+      this.backgroundBlur,
+      ASPECT_RATIO,
+      water,
+    );
+    handle.material.color.set(0x1a1a1a);
+    handle.material.opacity = REST_OPACITY;
 
-    return { material, videoHandle: null };
+    return { material: handle.material, ripple: handle, videoHandle: null };
   }
 
   private getBreakpoint(): (typeof COLUMN_BREAKPOINTS)[number] {
@@ -421,7 +444,13 @@ export class WorkList {
     this.root.addEventListener("pointerleave", this.handlePointerLeave);
   }
 
-  private raycastAt(clientX: number, clientY: number): PlaneEntry | null {
+  /**
+   * uv(戻り値)はTHREE.Vector2だが、three/webgpuには型定義が無いためany。
+   */
+  private raycastAt(
+    clientX: number,
+    clientY: number,
+  ): { entry: PlaneEntry; uv: any } | null {
     if (!this.world) {
       return null;
     }
@@ -441,9 +470,14 @@ export class WorkList {
       return null;
     }
 
-    const hitMesh = intersections[0].object;
+    const hit = intersections[0];
+    const entry = this.entries.find((candidate) => candidate.mesh === hit.object);
 
-    return this.entries.find((entry) => entry.mesh === hitMesh) ?? null;
+    if (!entry || !hit.uv) {
+      return null;
+    }
+
+    return { entry, uv: hit.uv };
   }
 
   private handleClick = (event: MouseEvent): void => {
@@ -451,47 +485,53 @@ export class WorkList {
       return;
     }
 
-    const entry = this.raycastAt(event.clientX, event.clientY);
+    const hit = this.raycastAt(event.clientX, event.clientY);
 
-    if (!entry) {
+    if (!hit) {
       return;
     }
 
     document.dispatchEvent(
       new CustomEvent("worklist:open", {
         detail: {
-          slug: entry.portfolio.slug.current,
-          title: entry.portfolio.title,
+          slug: hit.entry.portfolio.slug.current,
+          title: hit.entry.portfolio.title,
         },
       }),
     );
   };
 
   private handlePointerMove = (event: PointerEvent): void => {
-    const entry = this.raycastAt(event.clientX, event.clientY);
+    const hit = this.raycastAt(event.clientX, event.clientY);
+    const entry = hit?.entry ?? null;
 
     if (entry !== this.hoveredEntry) {
       if (this.hoveredEntry) {
         this.setHoverScale(this.hoveredEntry, 1);
+        this.hoveredEntry.ripple.setHoverActive(false);
       }
 
       this.hoveredEntry = entry;
 
       if (entry) {
         this.setHoverScale(entry, 1.08);
+        entry.ripple.setHoverActive(true);
 
         this.cursor?.setHoverActive(true);
       } else {
         this.cursor?.setHoverActive(false);
       }
+    }
 
-      return;
+    if (hit) {
+      hit.entry.ripple.setPointerUv(hit.uv.x, hit.uv.y);
     }
   };
 
   private handlePointerLeave = (): void => {
     if (this.hoveredEntry) {
       this.setHoverScale(this.hoveredEntry, 1);
+      this.hoveredEntry.ripple.setHoverActive(false);
       this.hoveredEntry = null;
     }
 

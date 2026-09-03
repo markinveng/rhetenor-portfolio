@@ -2,6 +2,8 @@ import * as THREE from "three/webgpu";
 import { CameraController } from "../CameraController";
 import { RenderPipeline } from "../RenderPipeline";
 import { DebugGUI } from "../DebugGUI";
+import { Water } from "./Water";
+import { RockBackdrop } from "./WaterBackground/RockBackdrop";
 
 export interface WorldContext {
   /** THREE.Scene(three/webgpuには@types/threeのサブパス型定義が無いためany)。 */
@@ -9,6 +11,11 @@ export interface WorldContext {
   cameraController: CameraController;
   renderPipeline: RenderPipeline;
   debugGUI: DebugGUI | null;
+  /**
+   * WaterBackground/WorkListが共有するWaterインスタンス。sampleWave()で
+   * 水面の高さ・法線をサンプリングできる(WorkListのPlaneジオメトリの歪みに使用)。
+   */
+  water: Water;
   /** 毎フレーム呼ばれるコールバックを登録する。戻り値の関数で解除できる。 */
   registerUpdate(fn: (delta: number) => void): () => void;
   /** 現在のカメラ視点で、z=0平面上のpx→world単位への変換係数。 */
@@ -16,6 +23,7 @@ export interface WorldContext {
 }
 
 let context: WorldContext | null = null;
+let rockBackdrop: RockBackdrop | null = null;
 let updateFns: Array<(delta: number) => void> = [];
 let lastTime = 0;
 let resizeHandler: (() => void) | null = null;
@@ -54,6 +62,27 @@ export function getOrCreateWorld(container: HTMLDivElement): WorldContext {
     cameraController.registerGUI(debugGUI.addFolder("Camera"));
   }
 
+  function computePixelsToWorld(): number {
+    const camera = cameraController.camera;
+    const distance = camera.position.z;
+    const fovRad = (camera.fov * Math.PI) / 180;
+    const visibleHeight = 2 * Math.tan(fovRad / 2) * distance;
+
+    return visibleHeight / window.innerHeight;
+  }
+
+  /*
+   * Waterは常時流れるアンビエントフローを持つため、WaterBackground/WorkListの
+   * どちらが先に初期化されても同じインスタンスを参照できるよう、
+   * 共有World自身が生成・所有する(WaterBackgroundは薄いラッパーとしてポインタ入力を渡すだけ)。
+   */
+  rockBackdrop = new RockBackdrop(scene);
+  const water = new Water(scene, rockBackdrop);
+
+  if (debugGUI) {
+    water.registerGUI(debugGUI.addFolder("Water"));
+  }
+
   renderPipeline.renderer.setAnimationLoop((time: number) => {
     const delta = lastTime ? (time - lastTime) / 1000 : 0;
     lastTime = time;
@@ -74,6 +103,7 @@ export function getOrCreateWorld(container: HTMLDivElement): WorldContext {
     cameraController,
     renderPipeline,
     debugGUI,
+    water,
 
     registerUpdate(fn) {
       updateFns.push(fn);
@@ -83,15 +113,18 @@ export function getOrCreateWorld(container: HTMLDivElement): WorldContext {
       };
     },
 
-    getPixelsToWorld() {
-      const camera = cameraController.camera;
-      const distance = camera.position.z;
-      const fovRad = (camera.fov * Math.PI) / 180;
-      const visibleHeight = 2 * Math.tan(fovRad / 2) * distance;
-
-      return visibleHeight / window.innerHeight;
-    },
+    getPixelsToWorld: computePixelsToWorld,
   };
+
+  context.registerUpdate(() => {
+    const pixelsToWorld = computePixelsToWorld();
+
+    rockBackdrop?.update(pixelsToWorld);
+    water.update(
+      (node, dispatchSize) => renderPipeline.compute(node, dispatchSize),
+      pixelsToWorld,
+    );
+  });
 
   return context;
 }
@@ -114,6 +147,9 @@ export function disposeWorld(): void {
   }
 
   context.renderPipeline.renderer.setAnimationLoop(null);
+  context.water.dispose();
+  rockBackdrop?.dispose();
+  rockBackdrop = null;
   context.renderPipeline.dispose();
   context.debugGUI?.dispose();
 
