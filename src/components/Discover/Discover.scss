@@ -1,0 +1,15 @@
+.discover {
+  height: 695px;
+  overflow: hidden;
+  position: relative;
+  &__intro {
+    background-color: #f5f5f5;
+  }
+  &__scroll {
+    position: absolute;
+  }
+
+  &__scroll-content {
+    display: flex;
+  }
+}

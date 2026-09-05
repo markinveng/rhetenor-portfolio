@@ -1,0 +1,25 @@
+  /* デザイン未着手のため、値の確認ができる最小限のレイアウトのみ。 */
+  .discover-story {
+    flex: 0 0 100vw;
+    width: 100vw;
+    height: 100%;
+
+    display: flex;
+    flex-direction: column;
+    gap: 32px;
+
+    box-sizing: border-box;
+    padding: 96px 48px;
+    overflow-y: auto;
+  }
+
+  .discover-story__item {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .discover-story__item-image {
+    max-width: 100%;
+    height: auto;
+  }

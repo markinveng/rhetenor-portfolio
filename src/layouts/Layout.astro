@@ -29,16 +29,22 @@ const {
 		{ogpImage && <meta property="og:image" content={ogpImage} />}
 		<meta property="og:title" content={title} />
 		<ClientRouter />
+
+		<script>
+			/*
+			 * astro:before-swapでのApp.destroy()(WorkList/WorkDetailの破棄)が、
+			 * WaterBackground/DiscoverGallery等(共有WorldのRendererを破棄する)より
+			 * 必ず先に実行されるよう、他のコンポーネントのスクリプトより前に
+			 * (<head>内、かつ<slot/>より前に)このリスナーを登録する(main.ts参照)。
+			 */
+			import "../ts/main";
+		</script>
 	</head>
 	<body transition:animate={fade({ duration: '1.1s' })}>
 		<slot />
 		<SoundToggle />
 	</body>
 </html>
-
-<script>
-	import "../ts/main";
-</script>
 
 <style is:global>
 	/*

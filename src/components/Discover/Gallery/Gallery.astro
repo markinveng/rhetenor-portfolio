@@ -1,0 +1,28 @@
+---
+import type { Gallery } from '../../../types/portfolio';
+import { urlFor } from '../../../ts/Sanity';
+import './Gallery.scss';
+
+interface Props {
+  gallery: Gallery;
+}
+
+const { gallery } = Astro.props;
+
+const images = gallery.images ?? [];
+---
+
+<section class="discover-gallery-section" data-discover-section="gallery">
+  <h2 class="discover-gallery-section__heading">Gallery</h2>
+
+  <div class="discover-gallery-section__grid">
+    {images.map((galleryImage) => (
+      <img
+        class="discover-gallery-section__image"
+        data-key={galleryImage._key}
+        src={urlFor(galleryImage.image).url()}
+        alt={galleryImage.alt ?? ''}
+      />
+    ))}
+  </div>
+</section>

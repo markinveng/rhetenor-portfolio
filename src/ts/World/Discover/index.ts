@@ -1,30 +1,23 @@
 import * as THREE from "three/webgpu";
-import gsap from "gsap";
-// gsap の型定義がWindows上で大文字小文字の衝突を起こすため抑制 (see: WorkList/index.tsと同様)
-// @ts-ignore
-import { Draggable } from "gsap/Draggable";
-// @ts-ignore
-import { InertiaPlugin } from "gsap/InertiaPlugin";
+import Lenis from "lenis";
 
 import { getOrCreateWorld, disposeWorld, type WorldContext } from "../index";
 
-gsap.registerPlugin(Draggable, InertiaPlugin);
-
-/** Planeの横幅を画面幅の何倍にするか(=横スクロールできる距離。単位: 画面幅)。 */
-const PLANE_WIDTH_IN_VIEWPORTS = 5;
-
-/** ホイール操作をドラッグ位置へなめらかに反映させる際の時間・イージング。 */
-const WHEEL_EASE_DURATION = 0.6;
-const WHEEL_EASE = "power2.out";
+/** マウスドラッグをスクロールとして扱い始めるまでの移動量(px)。単純なクリックと区別するため。 */
+const DRAG_THRESHOLD_PX = 4;
 
 /**
- * discoverページの背景。横に長いPlaneMeshへwhite_background.jpgをwidthに合わせて
- * 繰り返し表示し、ドラッグ/ホイールで横スクロールできるようにする。
- * WaterBackground/WorkListと同じ「共有Worldへ登録する薄いラッパー」の考え方に倣い、
+ * discoverページの背景。横に長いPlaneMeshへwhite_background.jpgを、実際のスクロール可能幅
+ * (=作品説明セクション群の合計幅)に合わせて繰り返し表示する。
+ * スクロールはLenis(horizontal)で滑らかにし、実際のDOM(scrollEl/contentEl)を
+ * ネイティブにスクロールさせることでスクロール範囲を厳密に(=端でのオーバーシュートなしに)
+ * クランプする。WaterBackground/WorkListと同じ「共有Worldへ登録する薄いラッパー」の考え方に倣い、
  * Scene/Camera/Rendererの生成・破棄は共有Worldに委ねる。
  */
-export class DiscoverGallery {
+export class Discover {
   private readonly root: HTMLElement;
+  private scrollEl: HTMLElement | null = null;
+  private contentEl: HTMLElement | null = null;
 
   private world: WorldContext | null = null;
   private readonly group = new THREE.Group();
@@ -34,41 +27,56 @@ export class DiscoverGallery {
   private texture: any = null;
   private mesh: any = null;
 
-  private draggable: Draggable | null = null;
-
-  /**
-   * root(ヒットテスト層)自体を動かすと、click/pointer判定に使う
-   * getBoundingClientRectごとビューポート外へずれてしまうため、
-   * Draggableの移動対象は別要素にし、rootはtriggerとしてのみ使う(WorkListと同じ理由)。
-   */
-  private readonly dragProxy = document.createElement("div");
-
-  private planeWidthPx = 0;
+  private lenis: Lenis | null = null;
+  private unregisterUpdate: (() => void) | null = null;
 
   private resizeObserver: ResizeObserver | null = null;
   private resizeFrame: number | null = null;
+
+  private isDragging = false;
+  private dragMoved = false;
+  private dragStartX = 0;
+  private dragStartScrollLeft = 0;
 
   constructor(root: HTMLElement) {
     this.root = root;
   }
 
   public init(): void {
+    this.scrollEl = this.root.querySelector<HTMLElement>(
+      "[data-discover-scroll]",
+    );
+    this.contentEl = this.root.querySelector<HTMLElement>(
+      "[data-discover-scroll-content]",
+    );
+
+    if (!this.scrollEl || !this.contentEl) {
+      return;
+    }
+
     this.world = getOrCreateWorld(this.root as HTMLDivElement);
     this.world.scene.add(this.group);
 
-    this.dragProxy.style.position = "fixed";
-    this.dragProxy.style.top = "0";
-    this.dragProxy.style.left = "0";
-    this.dragProxy.style.width = "0";
-    this.dragProxy.style.height = "0";
-    this.dragProxy.style.pointerEvents = "none";
-    document.body.appendChild(this.dragProxy);
-
     this.buildPlane();
-    this.layout();
+
+    this.lenis = new Lenis({
+      wrapper: this.scrollEl,
+      content: this.contentEl,
+      orientation: "horizontal",
+      gestureOrientation: "both",
+      autoRaf: false,
+    });
+
+    this.lenis.on("scroll", this.handleLenisScroll);
+
+    this.unregisterUpdate = this.world.registerUpdate(() => {
+      this.lenis?.raf(performance.now());
+    });
+
     this.initDrag();
-    this.initWheel();
     this.initResizeObserver();
+
+    this.layout();
   }
 
   /**
@@ -86,7 +94,6 @@ export class DiscoverGallery {
     );
     this.texture.wrapS = THREE.RepeatWrapping;
     this.texture.wrapT = THREE.RepeatWrapping;
-    this.texture.repeat.set(PLANE_WIDTH_IN_VIEWPORTS, 1);
 
     this.material = new (THREE as any).MeshBasicNodeMaterial({
       map: this.texture,
@@ -95,9 +102,9 @@ export class DiscoverGallery {
     this.mesh = new THREE.Mesh(this.geometry, this.material);
 
     /*
-     * 共有Worldは常にWaterを持つ(World/index.ts参照)。Waterと同じz=0付近だと
-     * 半透明なWaterがこの白背景の上に重なって見えてしまうため、
-     * カメラ側へわずかに寄せて深度テストで確実に隠す。
+     * discoverページの共有WorldはWaterBackgroundを含まないためWaterは存在しないが、
+     * 将来的な描画順の変化に備え、Water(renderOrder=-1想定)より必ず手前に来るよう
+     * カメラ側へわずかに寄せておく。
      */
     this.mesh.position.z = 0.5;
 
@@ -105,11 +112,11 @@ export class DiscoverGallery {
   }
 
   /**
-   * Planeを画面いっぱいの高さ・画面幅のPLANE_WIDTH_IN_VIEWPORTS倍の横幅で配置する。
-   * 初期状態(スクロール前)でPlaneの左端が画面左端に来るようにする。
+   * Planeを画面いっぱいの高さ・作品説明セクション群の合計幅(contentEl.scrollWidth)で配置する。
+   * テクスチャの繰り返し回数も、その幅を「画面幅の何個ぶんか」で再計算する。
    */
   private layout(): void {
-    if (!this.world || !this.mesh) {
+    if (!this.world || !this.mesh || !this.contentEl || !this.texture) {
       return;
     }
 
@@ -117,98 +124,93 @@ export class DiscoverGallery {
     const viewportWidthPx = window.innerWidth;
     const viewportHeightPx = window.innerHeight;
 
-    this.planeWidthPx = viewportWidthPx * PLANE_WIDTH_IN_VIEWPORTS;
+    const contentWidthPx = Math.max(
+      this.contentEl.scrollWidth,
+      viewportWidthPx,
+    );
 
-    const planeWidthWorld = this.planeWidthPx * pixelsToWorld;
+    const planeWidthWorld = contentWidthPx * pixelsToWorld;
     const planeHeightWorld = viewportHeightPx * pixelsToWorld;
     const viewportWidthWorld = viewportWidthPx * pixelsToWorld;
 
     this.mesh.scale.set(planeWidthWorld, planeHeightWorld, 1);
     this.mesh.position.x = planeWidthWorld / 2 - viewportWidthWorld / 2;
+
+    this.texture.repeat.set(contentWidthPx / viewportWidthPx, 1);
+
+    this.lenis?.resize();
+    this.syncGroupFromScroll();
+  }
+
+  private handleLenisScroll = (lenis: Lenis): void => {
+    if (!this.world) {
+      return;
+    }
+
+    this.group.position.x = -lenis.scroll * this.world.getPixelsToWorld();
+  };
+
+  private syncGroupFromScroll(): void {
+    if (!this.world || !this.scrollEl) {
+      return;
+    }
+
+    this.group.position.x =
+      -this.scrollEl.scrollLeft * this.world.getPixelsToWorld();
   }
 
   /**
-   * 横方向のみドラッグ可能にする。x/yのworld変換はWorkListと同じ考え方。
+   * 通常のマウスドラッグ(クリック&ドラッグ)でも横スクロールできるようにする。
+   * scrollEl.scrollLeftを直接動かすことで、ネイティブのスクロール範囲によって
+   * 自動的に端でクランプされる(オーバーシュートしない)。Lenisはこの結果生じる
+   * scrollイベントを検知して追従するため、Draggableのような別系統の同期は不要。
+   * リンク等への単純なクリックを妨げないよう、一定距離動くまではドラッグ扱いにしない。
    */
   private initDrag(): void {
-    this.draggable?.kill();
-
-    gsap.set(this.dragProxy, { x: 0 });
-    this.group.position.x = 0;
-
-    const instances = Draggable.create(this.dragProxy, {
-      trigger: this.root,
-      type: "x",
-      inertia: true,
-      bounds: this.getDragBoundsPx(),
-      edgeResistance: 0.8,
-
-      onDrag: () => this.syncGroupFromProxy(),
-      onThrowUpdate: () => this.syncGroupFromProxy(),
-    });
-
-    this.draggable = instances[0] ?? null;
+    this.scrollEl?.addEventListener("pointerdown", this.handlePointerDown);
   }
 
-  private getDragBoundsPx(): { minX: number; maxX: number } {
-    const viewportWidthPx = window.innerWidth;
-
-    return {
-      minX: Math.min(0, viewportWidthPx - this.planeWidthPx),
-      maxX: 0,
-    };
-  }
-
-  private syncGroupFromProxy(): void {
-    if (!this.world || !this.draggable) {
+  private handlePointerDown = (event: PointerEvent): void => {
+    if (event.button !== 0 || !this.scrollEl) {
       return;
     }
 
-    this.group.position.x = this.draggable.x * this.world.getPixelsToWorld();
-  }
+    this.isDragging = true;
+    this.dragMoved = false;
+    this.dragStartX = event.clientX;
+    this.dragStartScrollLeft = this.scrollEl.scrollLeft;
 
-  /**
-   * 通常のマウスホイール(縦方向の入力)でも横スクロールできるようにする。
-   * dragProxyの位置をなめらかにアニメーションさせ、Draggable.update()で
-   * ドラッグ側の内部状態も同期することで、ホイール操作の直後にそのままドラッグへ移っても
-   * 位置が飛ばないようにしている。
-   */
-  private initWheel(): void {
-    this.root.addEventListener("wheel", this.handleWheel, { passive: false });
-  }
+    window.addEventListener("pointermove", this.handlePointerMove);
+    window.addEventListener("pointerup", this.handlePointerUp);
+  };
 
-  private handleWheel = (event: WheelEvent): void => {
-    if (!this.draggable) {
+  private handlePointerMove = (event: PointerEvent): void => {
+    if (!this.isDragging || !this.scrollEl) {
       return;
     }
 
-    event.preventDefault();
+    const deltaX = event.clientX - this.dragStartX;
 
-    const bounds = this.getDragBoundsPx();
-    const delta = Math.abs(event.deltaY) > Math.abs(event.deltaX)
-      ? event.deltaY
-      : event.deltaX;
+    if (!this.dragMoved && Math.abs(deltaX) < DRAG_THRESHOLD_PX) {
+      return;
+    }
 
-    const nextX = THREE.MathUtils.clamp(
-      this.draggable.x - delta,
-      bounds.minX,
-      bounds.maxX,
-    );
+    this.dragMoved = true;
+    this.scrollEl.scrollLeft = this.dragStartScrollLeft - deltaX;
+  };
 
-    gsap.to(this.dragProxy, {
-      x: nextX,
-      duration: WHEEL_EASE_DURATION,
-      ease: WHEEL_EASE,
-      overwrite: true,
+  private handlePointerUp = (): void => {
+    this.isDragging = false;
 
-      onUpdate: () => {
-        this.draggable?.update();
-        this.syncGroupFromProxy();
-      },
-    });
+    window.removeEventListener("pointermove", this.handlePointerMove);
+    window.removeEventListener("pointerup", this.handlePointerUp);
   };
 
   private initResizeObserver(): void {
+    if (!this.contentEl) {
+      return;
+    }
+
     this.resizeObserver = new ResizeObserver(() => {
       if (this.resizeFrame !== null) {
         cancelAnimationFrame(this.resizeFrame);
@@ -216,22 +218,18 @@ export class DiscoverGallery {
 
       this.resizeFrame = requestAnimationFrame(() => {
         this.layout();
-        this.initDrag();
         this.resizeFrame = null;
       });
     });
 
-    this.resizeObserver.observe(this.root);
+    this.resizeObserver.observe(this.contentEl);
   }
 
   public destroy(): void {
-    this.root.removeEventListener("wheel", this.handleWheel);
-
-    this.draggable?.kill();
-    this.draggable = null;
-
-    gsap.killTweensOf(this.dragProxy);
-    this.dragProxy.remove();
+    this.scrollEl?.removeEventListener("pointerdown", this.handlePointerDown);
+    window.removeEventListener("pointermove", this.handlePointerMove);
+    window.removeEventListener("pointerup", this.handlePointerUp);
+    this.isDragging = false;
 
     this.resizeObserver?.disconnect();
     this.resizeObserver = null;
@@ -240,6 +238,12 @@ export class DiscoverGallery {
       cancelAnimationFrame(this.resizeFrame);
       this.resizeFrame = null;
     }
+
+    this.unregisterUpdate?.();
+    this.unregisterUpdate = null;
+
+    this.lenis?.destroy();
+    this.lenis = null;
 
     if (this.mesh) {
       this.group.remove(this.mesh);

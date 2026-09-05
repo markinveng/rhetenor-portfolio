@@ -1,0 +1,80 @@
+---
+import type { Portfolio } from "../../types/portfolio";
+import Concept from "./Concept/Concept.astro";
+import Story from "./Story/Story.astro";
+import Credit from "./Credit//Credit.astro";
+import Gallery from "./Gallery/Gallery.astro";
+import "./Discover.scss";
+
+interface Props {
+  portfolio: Portfolio;
+}
+
+const { portfolio } = Astro.props;
+
+const hasConcept = Boolean(
+  portfolio.concept && ((portfolio.concept.body?.length ?? 0) > 0 || portfolio.concept.image)
+);
+const hasStory = Boolean(portfolio.story?.items && portfolio.story.items.length > 0);
+const hasCredit = Boolean(portfolio.credits?.people && portfolio.credits.people.length > 0);
+const hasGallery = Boolean(portfolio.gallery?.images && portfolio.gallery.images.length > 0);
+---
+
+<div class="discover" data-discover-gallery>
+  <div class="discover__intro">
+    <h1 class="discover__heading">{portfolio.title}</h1>
+  </div>
+  <div class="discover__scroll" data-discover-scroll>
+    <div class="discover__scroll-content" data-discover-scroll-content>
+      <!-- {hasConcept && <Concept concept={portfolio.concept!} />}
+      {hasStory && <Story story={portfolio.story!} />}
+      {hasCredit && <Credit credits={portfolio.credits!} />}
+      {hasGallery && <Gallery gallery={portfolio.gallery!} />} -->
+    </div>
+  </div>
+</div>
+
+<script>
+  import { Discover } from "../../ts/World/Discover";
+
+  let gallery: Discover | null = null;
+
+  /*
+   * このスクリプトはAstro側の仕組み上、一度実行されると同じ内容のスクリプトとしては
+   * 再実行されず、ここで登録したリスナーはSPAセッション中ずっとdocumentに残り続ける。
+   * そのため、discoverページを含まない遷移(例: discover → トップ)でも
+   * astro:page-load / astro:before-swap は毎回発火する。自分の要素が存在する
+   * ページの遷移でだけ作成/破棄するようガードしないと、無関係な遷移で共有World
+   * (トップページが直後に作ったWater/Renderer等)を巻き込んで壊してしまう
+   * (実際に、discover→トップへブラウザバックした際、トップページのWaterBackground/
+   * WorkListが作り直したcanvasを、このスクリプトのstart()が誤って破棄していた)。
+   */
+  const start = (): void => {
+    const root = document.querySelector<HTMLElement>("[data-discover-gallery]");
+
+    if (!root) {
+      return;
+    }
+
+    gallery?.destroy();
+    gallery = new Discover(root);
+    gallery.init();
+  };
+
+  const stop = (): void => {
+    if (!document.querySelector("[data-discover-gallery]")) {
+      return;
+    }
+
+    gallery?.destroy();
+    gallery = null;
+  };
+
+  // astro:transitions(ClientRouter)の遷移のたびに作り直す。
+  document.addEventListener("astro:page-load", start);
+
+  // ページ遷移/リロード時の後始末（useEffect の return 相当）
+  document.addEventListener("astro:before-swap", stop, { once: false });
+
+  window.addEventListener("beforeunload", stop, { once: true });
+</script>

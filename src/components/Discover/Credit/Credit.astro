@@ -1,0 +1,35 @@
+---
+import type { Credits } from '../../../types/portfolio';
+import './Credit.scss';
+interface Props {
+  credits: Credits;
+}
+
+const { credits } = Astro.props;
+
+const people = credits.people ?? [];
+---
+
+<section class="discover-credit" data-discover-section="credit">
+  <h2 class="discover-credit__heading">Credit</h2>
+
+  {people.map((person) => (
+    <div class="discover-credit__person" data-key={person._key}>
+      <p class="discover-credit__name">{person.name}</p>
+
+      {person.role && <p class="discover-credit__role">{person.role}</p>}
+
+      {person.links && person.links.length > 0 && (
+        <ul class="discover-credit__links">
+          {person.links.map((link) => (
+            <li class="discover-credit__link" data-key={link._key}>
+              <a href={link.url} target="_blank" rel="noopener noreferrer">
+                {link.label}
+              </a>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  ))}
+</section>

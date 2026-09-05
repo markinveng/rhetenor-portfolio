@@ -9,23 +9,41 @@ import styles from "./WaterBackground.module.scss";
 
   let cleanup: (() => void) | null = null;
 
+  /*
+   * このスクリプトはAstro側の仕組み上、一度実行されると同じ内容のスクリプトとしては
+   * 再実行されず、ここで登録したリスナーはSPAセッション中ずっとdocumentに残り続ける。
+   * そのため、WaterBackgroundを含まないページへの行き来でも astro:page-load /
+   * astro:before-swap は毎回発火する。自分の要素が存在するページの遷移でだけ
+   * 作成/破棄するようガードしないと、無関係な遷移で共有World(他ページが直後に
+   * 作ったWater/Renderer等)を巻き込んで壊してしまう。
+   */
   const start = (): void => {
-    cleanup?.();
-
     const container = document.querySelector(
       "[data-water-background]"
     ) as HTMLDivElement | null;
 
+    if (!container) {
+      return;
+    }
+
+    cleanup?.();
     cleanup = initWaterBackground(container);
+  };
+
+  const stop = (): void => {
+    if (!document.querySelector("[data-water-background]")) {
+      return;
+    }
+
+    cleanup?.();
+    cleanup = null;
   };
 
   // astro:transitions(ClientRouter)の遷移のたびに作り直す。
   document.addEventListener("astro:page-load", start);
 
   // ページ遷移/リロード時の後始末（useEffect の return 相当）
-  document.addEventListener("astro:before-swap", () => cleanup?.(), {
-    once: false,
-  });
+  document.addEventListener("astro:before-swap", stop, { once: false });
 
-  window.addEventListener("beforeunload", () => cleanup?.(), { once: true });
+  window.addEventListener("beforeunload", stop, { once: true });
 </script>

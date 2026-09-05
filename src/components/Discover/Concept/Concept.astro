@@ -1,0 +1,24 @@
+---
+import type { Concept } from "../../../types/portfolio";
+import { urlFor } from "../../../ts/Sanity";
+import { portableTextToPlainText } from "../../../ts/utils/portableText";
+import "./Concept.scss";
+
+interface Props {
+  concept: Concept;
+}
+
+const { concept } = Astro.props;
+
+const bodyText = portableTextToPlainText(concept.body);
+const imageUrl = concept.image ? urlFor(concept.image).url() : undefined;
+---
+
+<section class="discover-concept" data-discover-section="concept">
+  <h2 class="discover-concept__heading">Concept</h2>
+  <div class="discover-concept__content">
+    {imageUrl && <img class="discover-concept__image" src={imageUrl} alt={concept.caption ?? ""} />}
+  </div>
+
+  {bodyText && <p class="discover-concept__body">{bodyText}</p>}
+</section>

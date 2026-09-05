@@ -1,14 +1,14 @@
 ---
 export const prerender = false;
 
-import Layout from '../layouts/Layout.astro';
-import DiscoverGallery from '../components/Discover/DiscoverGallery.astro';
-import { PortfolioApi, urlFor } from '../ts/Sanity';
+import Layout from "../layouts/Layout.astro";
+import Discover from "../components/Discover/Discover.astro";
+import { PortfolioApi, urlFor } from "../ts/Sanity";
 
-const slug = Astro.url.searchParams.get('prov');
+const slug = Astro.url.searchParams.get("prov");
 
 if (!slug) {
-  return Astro.redirect('/error');
+  return Astro.redirect("/error");
 }
 
 const portfolioApi = new PortfolioApi();
@@ -18,16 +18,16 @@ try {
   const portfolio = await portfolioApi.getBySlug(slug);
 
   if (!portfolio) {
-    return Astro.redirect('/error');
+    return Astro.redirect("/error");
   }
 
   // SSR側(devサーバーのターミナル)でも取得結果を確認できるようにする。
-  console.log('[discover] fetched portfolio by slug:', slug, portfolio);
+  console.log("[discover] fetched portfolio by slug:", slug, portfolio);
 
   portfolioData = portfolio;
 } catch (error) {
-  console.error('Error fetching portfolio:', error);
-  return Astro.redirect('/error');
+  console.error("Error fetching portfolio:", error);
+  return Astro.redirect("/error");
 }
 ---
 
@@ -36,36 +36,28 @@ try {
   metaDescription={portfolioData.metaDescription}
   ogpImage={portfolioData.ogpImage ? urlFor(portfolioData.ogpImage).url() : undefined}
 >
-  <DiscoverGallery />
-
-  <main>
-    <h1>{portfolioData.title}</h1>
-    <p>{portfolioData.modalDescription}</p>
+  <main style="position: relative;">
+    <Discover portfolio={portfolioData} />
   </main>
 
   <script
     type="application/json"
     data-portfolio-detail
-    set:html={JSON.stringify(portfolioData).replace(/</g, '\\u003c')}
+    set:html={JSON.stringify(portfolioData).replace(/</g, "\\u003c")}
   />
 
   <script>
     // ブラウザのコンソールでも取得結果を確認できるようにする。
     // astro:page-loadはハード/SPA遷移どちらでも発火するため、ここで使う(main.tsと同様)。
     const logPortfolioDetail = (): void => {
-      const dataEl = document.querySelector<HTMLScriptElement>(
-        '[data-portfolio-detail]',
-      );
+      const dataEl = document.querySelector<HTMLScriptElement>("[data-portfolio-detail]");
 
       if (dataEl?.textContent) {
-        console.log(
-          '[discover] portfolio detail (client):',
-          JSON.parse(dataEl.textContent),
-        );
+        console.log("[discover] portfolio detail (client):", JSON.parse(dataEl.textContent));
       }
     };
 
-    document.addEventListener('astro:page-load', logPortfolioDetail);
+    document.addEventListener("astro:page-load", logPortfolioDetail);
   </script>
 </Layout>
 

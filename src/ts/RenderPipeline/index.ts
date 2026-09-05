@@ -50,5 +50,12 @@ export class RenderPipeline {
     if (this.renderer.domElement.parentNode) {
       this.renderer.domElement.parentNode.removeChild(this.renderer.domElement);
     }
+
+    /*
+     * これを呼ばないとWebGPUのGPUDevice/Adapterが解放されず、
+     * ページ遷移のたびにリークする。蓄積すると次ページのWebGPURenderer初期化が
+     * 不安定になり、Planeが描画されない(リロードで直る)不具合につながっていた。
+     */
+    this.renderer.dispose();
   }
 }

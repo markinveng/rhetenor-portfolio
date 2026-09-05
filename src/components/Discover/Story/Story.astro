@@ -1,0 +1,45 @@
+---
+import type { Story } from '../../../types/portfolio';
+import { urlFor } from '../../../ts/Sanity';
+import { portableTextToPlainText } from '../../../ts/utils/portableText';
+import './Story.scss';
+
+interface Props {
+  story: Story;
+}
+
+const { story } = Astro.props;
+
+const items = story.items ?? [];
+---
+
+<section class="discover-story" data-discover-section="story">
+  <h2 class="discover-story__heading">Story</h2>
+
+  {items.map((item) => {
+    const bodyText = portableTextToPlainText(item.body);
+    const imageUrl = item.image ? urlFor(item.image).url() : undefined;
+
+    return (
+      <article class="discover-story__item" data-key={item._key}>
+        {item.title && (
+          <h3 class="discover-story__item-title">{item.title}</h3>
+        )}
+
+        {imageUrl && (
+          <img
+            class="discover-story__item-image"
+            src={imageUrl}
+            alt={item.caption ?? item.title ?? ''}
+          />
+        )}
+
+        {item.caption && (
+          <p class="discover-story__item-caption">{item.caption}</p>
+        )}
+
+        {bodyText && <p class="discover-story__item-body">{bodyText}</p>}
+      </article>
+    );
+  })}
+</section>

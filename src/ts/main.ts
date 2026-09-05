@@ -58,15 +58,24 @@ class App {
 /*
  * astro:transitions(ClientRouter)によるページ遷移のたびに
  * 前のページのインスタンスを破棄してから作り直す。
+ * 破棄はastro:before-swapで行う(WaterBackground/DiscoverGalleryと同じ規約)。
+ * WorkList/WorkDetailが保持するThree.jsのmaterial/geometryは、それらを描画していた
+ * 共有WorldのRenderer(WaterBackground等がastro:before-swapで破棄する)より先に
+ * 破棄しておく必要があるため、このリスナーはLayout.astro側で他の
+ * コンポーネントより先に登録されるようにしている(Layout.astro参照)。
  */
 let app: App | null = null;
 
 const start = (): void => {
-  app?.destroy();
-
   app = new App();
-
   app.init();
 };
 
+const stop = (): void => {
+  app?.destroy();
+  app = null;
+};
+
 document.addEventListener("astro:page-load", start);
+document.addEventListener("astro:before-swap", stop);
+window.addEventListener("beforeunload", stop, { once: true });
